@@ -1,5 +1,8 @@
 #!/usr/bin/env python
+import logging
 import os.path
+from decimal import Decimal
+
 import pandas as pd
 from shutil import move
 import asyncio
@@ -238,6 +241,8 @@ class MarketsRecorder:
             self._ev_loop.call_soon_threadsafe(self._did_fill_order, event_tag, market, evt)
             return
 
+        logging.getLogger(__name__).info(f"\n****\n{evt}\n")
+
         session: Session = self.session
         base_asset, quote_asset = evt.trading_pair.split("-")
         timestamp: int = self.db_timestamp
@@ -265,12 +270,13 @@ class MarketsRecorder:
                                                  order_id=order_id,
                                                  trade_type=evt.trade_type.name,
                                                  order_type=evt.order_type.name,
-                                                 price=float(evt.price) if evt.price == evt.price else 0,
-                                                 amount=float(evt.amount),
+                                                 price=Decimal(evt.price) if evt.price == evt.price else Decimal(0),
+                                                 amount=Decimal(evt.amount),
                                                  leverage=evt.leverage if evt.leverage else 1,
                                                  trade_fee=TradeFee.to_json(evt.trade_fee),
                                                  exchange_trade_id=evt.exchange_trade_id,
                                                  position=evt.position if evt.position else "NILL", )
+        logging.getLogger(__name__).info(f"\n@@@@\n{trade_fill_record}\n")
         session.add(order_status)
         session.add(trade_fill_record)
         self.save_market_states(self._config_file_path, market, no_commit=True)
