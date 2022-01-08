@@ -1,17 +1,8 @@
-#!/usr/bin/env python
 import logging
 import os.path
-from decimal import Decimal
-
-import pandas as pd
-from shutil import move
-import asyncio
-from sqlalchemy.orm import (
-    Session,
-    Query
-)
 import time
 import threading
+from decimal import Decimal
 from typing import (
     Dict,
     List,
@@ -20,25 +11,34 @@ from typing import (
     Union,
 )
 
+import pandas as pd
+import asyncio
+from shutil import move
+from sqlalchemy.orm import (
+    Query,
+    Session,
+)
+
 from hummingbot import data_path
+from hummingbot.connector.connector_base import ConnectorBase
+from hummingbot.connector.utils import TradeFillOrderDetails
 from hummingbot.core.event.events import (
-    BuyOrderCreatedEvent,
-    SellOrderCreatedEvent,
-    OrderFilledEvent,
     BuyOrderCompletedEvent,
-    SellOrderCompletedEvent,
+    BuyOrderCreatedEvent,
+    FundingPaymentCompletedEvent,
+    MarketEvent,
     MarketOrderFailureEvent,
     OrderCancelledEvent,
     OrderExpiredEvent,
-    FundingPaymentCompletedEvent,
-    MarketEvent,
-    TradeFee,
+    OrderFilledEvent,
     RangePositionInitiatedEvent,
     RangePositionUpdatedEvent,
+    SellOrderCompletedEvent,
+    SellOrderCreatedEvent,
+    TradeFee,
 )
 from hummingbot.core.event.event_forwarder import SourceInfoEventForwarder
-from hummingbot.connector.connector_base import ConnectorBase
-from hummingbot.connector.utils import TradeFillOrderDetails
+from hummingbot.model.funding_payment import FundingPayment
 from hummingbot.model.market_state import MarketState
 from hummingbot.model.order import Order
 from hummingbot.model.order_status import OrderStatus
@@ -46,7 +46,6 @@ from hummingbot.model.range_position import RangePosition
 from hummingbot.model.range_position_update import RangePositionUpdate
 from hummingbot.model.sql_connection_manager import SQLConnectionManager
 from hummingbot.model.trade_fill import TradeFill
-from hummingbot.model.funding_payment import FundingPayment
 
 
 class MarketsRecorder:
@@ -217,9 +216,9 @@ class MarketsRecorder:
                                     quote_asset=quote_asset,
                                     creation_timestamp=timestamp,
                                     order_type=evt.type.name,
-                                    amount=float(evt.amount),
+                                    amount=Decimal(evt.amount),
                                     leverage=evt.leverage if evt.leverage else 1,
-                                    price=float(evt.price) if evt.price == evt.price else 0,
+                                    price=Decimal(evt.price) if evt.price == evt.price else Decimal(0),
                                     position=evt.position if evt.position else "NILL",
                                     last_status=event_type.name,
                                     last_update_timestamp=timestamp,
