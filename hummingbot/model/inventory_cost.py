@@ -68,8 +68,3 @@ class InventoryCost(HummingbotBase):
                 quote_volume=float(quote_volume),
             )
             sql_session.add(record)
-
-        try:
-            sql_session.commit()
-        except Exception:
-            sql_session.rollback()

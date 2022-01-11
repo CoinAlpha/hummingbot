@@ -25,7 +25,6 @@ import time
 from .order_book_message import OrderBookMessage
 from .order_book_row import OrderBookRow
 from .order_book_query_result import OrderBookQueryResult
-from sqlalchemy.engine import RowProxy
 import bisect
 import logging
 cimport numpy as np

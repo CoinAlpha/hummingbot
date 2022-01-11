@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from sqlalchemy import BigInteger, TypeDecorator
@@ -18,8 +19,10 @@ class SqliteDecimal(TypeDecorator):
     def process_bind_param(self, value, dialect):
         # e.g. value = Column(SqliteDecimal(2)) means a value such as
         # Decimal('12.34') will be converted to 1234 in Sqlite
+        logging.getLogger(__name__).info(f"\n^^^ Value to write to the DB: {value}")
         if value is not None:
             value = int(Decimal(value) * self.multiplier_int)
+        logging.getLogger(__name__).info(f"\n^^^ Transformed value: {value}")
         return value
 
     def process_result_value(self, value, dialect):

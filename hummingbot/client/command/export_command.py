@@ -65,34 +65,37 @@ class ExportCommand:
         else:
             return input
 
-    async def export_trades(self,  # type: HummingbotApplication
-                            ):
-        trades: List[TradeFill] = self._get_trades_from_session(int(self.init_time * 1e3))
-        if len(trades) == 0:
-            self._notify("No past trades to export.")
-            return
-        self.placeholder_mode = True
-        self.app.hide_input = True
-        path = global_config_map["log_file_path"].value
-        if path is None:
-            path = DEFAULT_LOG_FILE_PATH
-        file_name = await self.prompt_new_export_file_name(path)
-        file_path = os.path.join(path, file_name)
-        try:
-            df: pd.DataFrame = TradeFill.to_pandas(trades)
-            df.to_csv(file_path, header=True)
-            self._notify(f"Successfully exported trades to {file_path}")
-        except Exception as e:
-            self._notify(f"Error exporting trades to {path}: {e}")
-        self.app.change_prompt(prompt=">>> ")
-        self.placeholder_mode = False
-        self.app.hide_input = False
+    async def export_trades(self):
+        with self.trade_fill_db.get_new_session() as session:
+            trades: List[TradeFill] = self._get_trades_from_session(
+                int(self.init_time * 1e3),
+                session=session)
+            if len(trades) == 0:
+                self._notify("No past trades to export.")
+                return
+            self.placeholder_mode = True
+            self.app.hide_input = True
+            path = global_config_map["log_file_path"].value
+            if path is None:
+                path = DEFAULT_LOG_FILE_PATH
+            file_name = await self.prompt_new_export_file_name(path)
+            file_path = os.path.join(path, file_name)
+            try:
+                df: pd.DataFrame = TradeFill.to_pandas(trades)
+                df.to_csv(file_path, header=True)
+                self._notify(f"Successfully exported trades to {file_path}")
+            except Exception as e:
+                self._notify(f"Error exporting trades to {path}: {e}")
+            self.app.change_prompt(prompt=">>> ")
+            self.placeholder_mode = False
+            self.app.hide_input = False
 
     def _get_trades_from_session(self,  # type: HummingbotApplication
                                  start_timestamp: int,
+                                 session: Session,
                                  number_of_rows: Optional[int] = None,
                                  config_file_path: str = None) -> List[TradeFill]:
-        session: Session = self.trade_fill_db.get_shared_session()
+
         filters = [TradeFill.timestamp >= start_timestamp]
         if config_file_path is not None:
             filters.append(TradeFill.config_file_path.like(f"%{config_file_path}%"))

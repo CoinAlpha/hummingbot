@@ -118,7 +118,6 @@ class TradeFill(HummingbotBase):
                               "Position",
                               "Age",
                               "Order ID",
-                              "Exchange Order ID",
                               "Trade ID"]
         data = []
         index = 0
@@ -151,7 +150,6 @@ class TradeFill(HummingbotBase):
                 trade.position,
                 age,
                 trade.order_id,
-                trade.order.exchange_order_id,
                 trade.exchange_trade_id,
             ])
         df = pd.DataFrame(data=data, columns=columns)

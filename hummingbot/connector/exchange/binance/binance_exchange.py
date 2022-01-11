@@ -155,6 +155,8 @@ class BinanceExchange(ExchangeBase):
         The key of each entry is the condition name, and the value is True if condition is ready, False otherwise.
         """
         return {
+            "symbols_mapping_initialized": BinanceAPIOrderBookDataSource.trading_pair_symbol_map_ready(
+                domain=self._domain),
             "order_books_initialized": self._order_book_tracker.ready,
             "account_balance": len(self._account_balances) > 0 if self._trading_required else True,
             "trading_rule_initialized": len(self._trading_rules) > 0,

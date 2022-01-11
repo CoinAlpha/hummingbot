@@ -6,7 +6,6 @@ from typing import (
 from decimal import Decimal
 import pandas as pd
 from os.path import join
-from sqlalchemy.orm import Session
 from hummingbot.client.settings import (
     GLOBAL_CONFIG_PATH,
     CONF_FILE_PATH,
@@ -281,12 +280,13 @@ class ConfigCommand:
                 self._notify("Inventory price not updated due to bad input")
                 return
 
-            session: Session = self.trade_fill_db.get_shared_session()
-            InventoryCost.add_volume(
-                session,
-                base_asset=base_asset,
-                quote_asset=quote_asset,
-                base_volume=balances[base_asset],
-                quote_volume=quote_volume,
-                overwrite=True,
-            )
+            with self.trade_fill_db.get_new_session() as session:
+                with session.begin():
+                    InventoryCost.add_volume(
+                        session,
+                        base_asset=base_asset,
+                        quote_asset=quote_asset,
+                        base_volume=balances[base_asset],
+                        quote_volume=quote_volume,
+                        overwrite=True,
+                    )

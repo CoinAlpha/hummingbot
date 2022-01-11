@@ -28,7 +28,6 @@ class Migrator:
         copyfile(original_db_path, new_db_path)
         copyfile(original_db_path, backup_db_path)
 
-        db_handle.get_shared_session().close()
         db_handle.engine.dispose()
         new_db_handle = SQLConnectionManager(SQLConnectionType.TRADE_FILLS, new_db_path, original_db_name, True)
 
@@ -49,7 +48,6 @@ class Migrator:
                                       exc_info=True)
         finally:
             try:
-                new_db_handle.get_shared_session().close()
                 new_db_handle.engine.dispose()
                 if migration_succesful:
                     move(new_db_path, original_db_path)
