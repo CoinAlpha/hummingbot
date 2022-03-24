@@ -1,0 +1,114 @@
+name: hb_wheel
+
+on:
+  push:
+    branches: [master, development]
+
+jobs:
+  build_hummingbot:
+    name: build hb wheel
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # Use cache's hashFiles function to check for changes in core code
+      - name: Check for code changes
+        id: program-changes
+        uses: actions/cache@v2
+        env:
+          # Increase this value to manually reset cache if program files have not changed
+          CACHE_NUMBER: 0
+        with:
+          path: README.md # placeholder file
+          key: ${{ runner.os }}-build-${{ env.CACHE_NUMBER }}-${{ hashFiles('hummingbot/*', '**/*.py', '**/*.py*', '**/*.pxd', 'test/*') }}
+
+      # Remove envs directory if exists to prevent bin/tar restore errors
+      - name: Remove envs directory
+        run: rm -Rf /usr/share/miniconda/envs
+
+      # Check for setup/environmnet-linux.yml changes
+      - name: Cache conda dependencies
+        id: conda-dependencies
+        uses: actions/cache@v2
+        env:
+          # Increase this value to manually reset cache if setup/environment-linux.yml has not changed
+          CONDA_CACHE_NUMBER: 0
+        with:
+          path: |
+            /home/runner/conda_pkgs_dir/
+            /usr/share/miniconda/envs
+          key: ${{ runner.os }}-conda-${{ env.CONDA_CACHE_NUMBER }}-${{ hashFiles('setup/environment-linux.yml') }}
+
+      # Install python/conda to check if core code has changed
+      - uses: actions/setup-python@v2
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        with:
+          python-version: 3.x
+
+      - name: Install Miniconda and nose
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          MINICONDA_FILENAME=Miniconda3-latest-Linux-x86_64.sh
+          curl -o $MINICONDA_FILENAME "https://repo.continuum.io/miniconda/$MINICONDA_FILENAME"
+          bash ${MINICONDA_FILENAME} -b -f -p $HOME/miniconda3
+          source /usr/share/miniconda/etc/profile.d/conda.sh
+          conda install -c anaconda nose
+
+      # Install pre_commit if code has changed
+      - name: Install pre_commit
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          source /usr/share/miniconda/etc/profile.d/conda.sh
+          conda install -c conda-forge pre_commit
+
+      # Install hummingbot env if environment-linux.yml has changed
+      - name: Install Hummingbot
+        if: steps.conda-dependencies.outputs.cache-hit != 'true'
+        shell: bash -l {0}
+        run: |
+          source /usr/share/miniconda/etc/profile.d/conda.sh
+          ./install
+
+      # Compile and run tests if code has changed
+      - name: Compile Hummingbot
+        shell: bash
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        env:
+          WITHOUT_CYTHON_OPTIMIZATIONS: true
+        run: |
+          source /usr/share/miniconda/etc/profile.d/conda.sh
+          conda info --envs
+          conda activate hummingbot
+          conda env export
+          ./compile
+
+      # Build wheel file
+      - name: Build library wheel
+        shell: bash
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        run: |
+          source /usr/share/miniconda/etc/profile.d/conda.sh
+          conda activate hummingbot
+          rm -f library/hummingbot*linux.whl
+          python3 setup.py bdist_wheel
+          mv dist/hummingbot*linux*.whl library/
+      # Commit and push generated wheel file
+      - name: Commit wheel file
+        shell: bash
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add -f library/*
+          git commit -m "Build Hummingbot library wheel"
+      - name: Push changes
+        if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
