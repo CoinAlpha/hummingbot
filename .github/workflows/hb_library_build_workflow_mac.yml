@@ -64,7 +64,7 @@ jobs:
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add -f library/*
-          git commit -m "Build Hummingbot library wheel"
+          git commit -m "Build Hummingbot library wheel for MacOS"
       - name: Push changes
         if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
         uses: ad-m/github-push-action@master
