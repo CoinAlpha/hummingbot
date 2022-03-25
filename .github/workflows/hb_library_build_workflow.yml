@@ -7,7 +7,10 @@ on:
 jobs:
   build_hummingbot:
     name: build hb wheel
-    runs-on: "ubuntu-latest"
+    runs-on: ${{matrix.os}}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
 
     steps:
       - uses: actions/checkout@v2
@@ -54,7 +57,7 @@ jobs:
           conda activate hummingbot
           mkdir -p library
           python3 setup.py bdist_wheel
-          mv -f dist/hummingbot*linux*.whl library/
+          mv -f dist/hummingbot*.whl library/
       # Commit and push generated wheel file
       - name: Commit wheel file
         shell: bash
@@ -62,8 +65,9 @@ jobs:
         run: |
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          git pull --ff
           git add -f library/*
-          git commit -m "Build Hummingbot library wheel for Linux"
+          git commit -m "Build Hummingbot library wheel for ${{matrix.os}}"
       - name: Push changes
         if: steps.program-changes.outputs.cache-hit != 'true' || steps.conda-dependencies.outputs.cache-hit != 'true'
         uses: ad-m/github-push-action@master
