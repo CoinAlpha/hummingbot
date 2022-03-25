@@ -52,9 +52,9 @@ jobs:
         run: |
           source $CONDA/etc/profile.d/conda.sh
           conda activate hummingbot
-          rm -f library/hummingbot*linux.whl
+          mkdir -p library
           python3 setup.py bdist_wheel
-          mv dist/hummingbot*macosx*.whl library/
+          mv -f dist/hummingbot*macosx*.whl library/
 
       # Commit and push generated wheel file
       - name: Commit wheel file
