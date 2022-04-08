@@ -8,26 +8,26 @@ import { BigNumber, Contract, Transaction, Wallet } from 'ethers';
 import { Ethereum } from '../../../../src/chains/ethereum/ethereum';
 import { UniswapV3Helper } from '../../../../src/connectors/uniswap/uniswap.v3.helper';
 
-let ethereum: Ethereum;
+let arbitrum: Ethereum;
 let uniswapV3: UniswapV3;
 let uniswapV3Helper: UniswapV3Helper;
 let wallet: Wallet;
 
 const WETH = new Token(
   3,
-  '0xd0A1E359811322d97991E03f863a0C30C2cF029C',
+  '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
   18,
   'WETH'
 );
 const DAI = new Token(
   3,
-  '0x4f96fe3b7a6cf9725f59d353f723c1bdb64ca6aa',
+  '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',
   18,
   'DAI'
 );
 const USDC = new Token(
   3,
-  '0x2F375e94FC336Cdec2Dc0cCB5277FE59CBf1cAe5',
+  '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
   18,
   'USDC'
 );
@@ -45,7 +45,7 @@ const TICK_PROVIDER = [
 ];
 const TX = {
   type: 2,
-  chainId: 42,
+  chainId: 42161,
   nonce: 115,
   maxPriorityFeePerGas: { toString: () => '106000000000' },
   maxFeePerGas: { toString: () => '106000000000' },
@@ -77,15 +77,15 @@ const DAI_USDC_POOL = new uniV3.Pool(
 );
 
 beforeAll(async () => {
-  ethereum = Ethereum.getInstance('kovan');
-  await ethereum.init();
+  arbitrum = Ethereum.getInstance('arbitrumOne');
+  await arbitrum.init();
   wallet = new Wallet(
     '0000000000000000000000000000000000000000000000000000000000000002', // noqa: mock
-    ethereum.provider
+    arbitrum.provider
   );
-  uniswapV3 = UniswapV3.getInstance('ethereum', 'kovan');
+  uniswapV3 = UniswapV3.getInstance('ethereum', 'arbitrumOne');
   await uniswapV3.init();
-  uniswapV3Helper = new UniswapV3Helper('kovan');
+  uniswapV3Helper = new UniswapV3Helper('arbitrumOne');
 });
 
 afterEach(() => {
@@ -262,8 +262,8 @@ describe('verify UniswapV3 Nft functions', () => {
 
     const callData = await uniswapV3.addPositionHelper(
       wallet,
-      DAI,
       WETH,
+      DAI,
       '10',
       '10',
       500,
@@ -361,8 +361,8 @@ describe('verify UniswapV3 Nft functions', () => {
 
     const addTx = await uniswapV3.addPosition(
       wallet,
-      DAI,
       WETH,
+      DAI,
       '10',
       '10',
       500,

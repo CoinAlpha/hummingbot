@@ -62,8 +62,9 @@ export function getEthereumConfig(
     nativeCurrencySymbol: ConfigManagerV2.getInstance().get(
       chainName + '.networks.' + network + '.nativeCurrencySymbol'
     ),
-    manualGasPrice: ConfigManagerV2.getInstance().get(
-      chainName + '.manualGasPrice'
-    ),
+    manualGasPrice:
+      ConfigManagerV2.getInstance().get(
+        chainName + '.networks.' + network + '.manualGasPrice'
+      ) ?? ConfigManagerV2.getInstance().get(chainName + '.manualGasPrice'),
   };
 }

@@ -18,8 +18,15 @@ networks:
     chainID: 3
     nodeURL: https://ropsten.infura.io/v3/
     tokenListType: FILE
-    tokenListSource: src/chains/ethereum/erc20_tokens_ropsten.json  
+    tokenListSource: src/chains/ethereum/erc20_tokens_ropsten.json
     nativeCurrencySymbol: ETH
     gasPriceRefreshInterval: 60
+  arbitrumOne:
+    chainID: 42161
+    nodeURL: https://arbitrum-mainnet.infura.io/v3/
+    tokenListType: FILE
+    tokenListSource: src/chains/ethereum/erc20_tokens_arbitrum_one.json
+    nativeCurrencySymbol: ETH
+    manualGasPrice: 2
 nodeAPIKey: ''
 manualGasPrice: 110
