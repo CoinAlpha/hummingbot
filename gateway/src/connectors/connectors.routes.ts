@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../services/error-handler';
+import { DfxConfig } from './dfx/dfx.config';
 import { PangolinConfig } from './pangolin/pangolin.config';
 import { UniswapConfig } from './uniswap/uniswap.config';
 
@@ -15,6 +16,11 @@ export namespace ConnectorsRoutes {
             name: 'uniswap',
             trading_type: UniswapConfig.config.tradingTypes('v2'),
             available_networks: UniswapConfig.config.availableNetworks,
+          },
+          {
+            name: 'dfx',
+            trading_type: DfxConfig.config.tradingTypes,
+            available_networks: DfxConfig.config.availableNetworks,
           },
           {
             name: 'pangolin',

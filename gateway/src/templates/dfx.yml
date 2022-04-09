@@ -1,0 +1,16 @@
+# https://github.com/dfx-finance/contracts
+
+# how much the execution price is allowed to move unfavorably from the trade
+# execution price. It uses a rational number for precision.
+allowedSlippage: '1/100'
+
+# the maximum gas allowed for a trade.
+gasLimit: 150688
+
+# how long a trade is valid in seconds. After time passes pangolin will not
+# perform the trade, but the gas will still be spent.
+ttl: 300
+
+contractAddresses:
+  mainnet:
+      routerAddress: '0x9d0950c595786AbA7c26dfDdf270D66a8b18B4FA'
