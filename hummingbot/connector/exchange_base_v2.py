@@ -6,22 +6,17 @@ from decimal import Decimal
 from async_timeout import timeout
 
 from hummingbot.connector.exchange_base import ExchangeBase
-from hummingbot.connector.constants import s_decimal_NaN, s_decimal_0, MINUTE, TWELVE_HOURS
+from hummingbot.connector.constants import s_decimal_NaN, s_decimal_0
 from hummingbot.connector.client_order_tracker import ClientOrderTracker
-from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.connector.utils import get_new_client_order_id
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee
 from hummingbot.core.data_type.cancellation_result import CancellationResult
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, OrderState
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, OrderState, TradeUpdate
 from hummingbot.core.data_type.order_book import OrderBook
-from hummingbot.core.data_type.order_book_tracker import OrderBookTracker
-from hummingbot.core.data_type.user_stream_tracker import UserStreamTracker
-from hummingbot.core.network_iterator import NetworkStatus
-from hummingbot.core.web_assistant.connections.data_types import RESTMethod
-from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.data_type.trade_fee import TradeFeeBase, TokenAmount
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.logger import HummingbotLogger
 
@@ -34,72 +29,25 @@ class ExchangeBaseV2(ExchangeBase):
     # to cause a NameError if not defined
     #
     # DEFAULT_DOMAIN = ""
-    # RATE_LIMITS = None
     # SUPPORTED_ORDER_TYPES = []
     # MAX_ORDER_ID_LEN = None
     # HBOT_ORDER_ID_PREFIX = None
-    # SYMBOLS_PATH_URL = ""
-    # FEE_PATH_URL = ""
-    # CHECK_NETWORK_URL = ""
-    # ORDERBOOK_DS_CLASS = None
-    # USERSTREAM_DS_CLASS = None
-
-    SHORT_POLL_INTERVAL = 5.0
-    LONG_POLL_INTERVAL = 120.0
-    TRADING_RULES_INTERVAL = 30 * MINUTE
-    TRADING_FEES_INTERVAL = TWELVE_HOURS
-    UPDATE_ORDERS_INTERVAL = 10.0
-    TICK_INTERVAL_LIMIT = 60.0
+    # EXCHANGE_API_CLASS = None
 
     def __init__(self):
         super().__init__()
-
-        self._last_poll_timestamp = 0
         self._last_timestamp = 0
-        self._trading_rules = {}
-        self._trading_fees = {}
-
-        self._status_polling_task = None
-        self._user_stream_tracker_task = None
-        self._user_stream_event_listener_task = None
-        self._trading_rules_polling_task = None
-        self._trading_fees_polling_task = None
-
-        self._time_synchronizer = TimeSynchronizer()
-        self._throttler = AsyncThrottler(self.RATE_LIMITS)
-        self._poll_notifier = asyncio.Event()
-
-        # init Auth and Api factory
-        self._auth = self.init_auth()
-        self._api_factory = self.web_utils.build_api_factory(
-            throttler=self._throttler,
-            time_synchronizer=self._time_synchronizer,
-            domain=self._domain,
-            auth=self._auth)
-
-        # init OrderBook Data Source and Tracker
-        self._orderbook_ds = self.ORDERBOOK_DS_CLASS(
-            trading_pairs=self._trading_pairs,
-            domain=self._domain,
-            api_factory=self._api_factory,
-            throttler=self._throttler,
-            time_synchronizer=self._time_synchronizer)
-        self._order_book_tracker = OrderBookTracker(
-            data_source=self._orderbook_ds,
-            trading_pairs=self._trading_pairs,
-            domain=self._domain)
-
-        # init UserStream Data Source and Tracker
-        self._userstream_ds = self.USERSTREAM_DS_CLASS(
-            trading_pairs=self._trading_pairs,
-            auth=self._auth,
-            domain=self._domain,
-            api_factory=self._api_factory,
-            throttler=self._throttler)
-        self._user_stream_tracker = UserStreamTracker(
-            data_source=self._userstream_ds)
-
+        self._api = self.EXCHANGE_API_CLASS(
+            self,  # TODO bad
+            self._auth_credentials,
+            self._trading_pairs,
+            self._trading_required,
+            self._domain,
+        )
+        self._api_listener_task = None
         self._order_tracker: ClientOrderTracker = ClientOrderTracker(connector=self)
+        # TODO
+        self._trading_rules = self._api._trading_rules
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -107,8 +55,16 @@ class ExchangeBaseV2(ExchangeBase):
             cls._logger = logging.getLogger(__name__)
         return cls._logger
 
+    @property
+    def name_cap(self) -> str:
+        return self.name.capitalize()
+
+    # Implementation-specific method
+    #
+    def name(self):
+        raise NotImplementedError
+
     # Price logic
-    # TODO trading rules creation should have logic to ensure Decimal
     #
     @staticmethod
     def quantize_value(value: Decimal, quantum: Decimal) -> Decimal:
@@ -177,7 +133,7 @@ class ExchangeBaseV2(ExchangeBase):
 
     @property
     def order_books(self) -> Dict[str, OrderBook]:
-        return self._order_book_tracker.order_books
+        return self._api.order_book_tracker.order_books
 
     @property
     def in_flight_orders(self) -> Dict[str, InFlightOrder]:
@@ -204,43 +160,73 @@ class ExchangeBaseV2(ExchangeBase):
             raise ValueError(f"No order book exists for '{trading_pair}'.")
         return self._order_book_tracker.order_books[trading_pair]
 
+    # Order Tracking
+    #
     @property
-    def status_dict(self) -> Dict[str, bool]:
+    def tracking_states(self) -> Dict[str, any]:
+        """
+        Returns a dictionary associating current active orders client id to their JSON representation
+        """
         return {
-            "symbols_mapping_initialized": self._orderbook_ds.trading_pair_symbol_map_ready(
-                domain=self._domain),
-            "order_books_initialized": self._order_book_tracker.ready,
-            "account_balance": not self._trading_required or len(self._account_balances) > 0,
-            "trading_rule_initialized": len(self._trading_rules) > 0 if self._trading_required else True,
-            "user_stream_initialized":
-                self._user_stream_tracker.data_source.last_recv_time > 0 if self._trading_required else True,
+            key: value.to_json()
+            for key, value in self.in_flight_orders.items()
+            if not value.is_done
         }
 
-    @property
-    def ready(self) -> bool:
+    def restore_tracking_states(self, saved_states: Dict[str, Any]):
         """
-        Returns True if the connector is ready to operate (all connections established with the exchange). If it is
-        not ready it returns False.
-        """
-        return all(self.status_dict.values())
+        Restore in-flight orders from saved tracking states, this is st the connector can pick up on where it left off
+        when it disconnects.
 
-    def tick(self, timestamp: float):
+        :param saved_states: The saved tracking_states.
         """
-        Includes the logic that has to be processed every time a new tick happens in the bot. Particularly it enables
-        the execution of the status update polling loop using an event.
-        """
-        last_recv_diff = timestamp - self._user_stream_tracker.last_recv_time
-        poll_interval = (self.SHORT_POLL_INTERVAL
-                         if last_recv_diff > self.TICK_INTERVAL_LIMIT
-                         else self.LONG_POLL_INTERVAL)
-        last_tick = int(self._last_timestamp / poll_interval)
-        current_tick = int(timestamp / poll_interval)
-        if current_tick > last_tick:
-            if not self._poll_notifier.is_set():
-                self._poll_notifier.set()
-        self._last_timestamp = timestamp
+        self._order_tracker.restore_tracking_states(tracking_states=saved_states)
 
-    # Orders placing
+    def start_tracking_order(self,
+                             order_id: str,
+                             exchange_order_id: Optional[str],
+                             trading_pair: str,
+                             trade_type: TradeType,
+                             price: Decimal,
+                             amount: Decimal,
+                             order_type: OrderType):
+        """
+        Starts tracking an order by adding it to the order tracker.
+
+        :param order_id: the order identifier
+        :param exchange_order_id: the identifier for the order in the exchange
+        :param trading_pair: the token pair for the operation
+        :param trade_type: the type of order (buy or sell)
+        :param price: the price for the order
+        :param amount: the amount for the order
+        :param order_type: type of execution for the order (MARKET, LIMIT, LIMIT_MAKER)
+        """
+        self._order_tracker.start_tracking_order(
+            InFlightOrder(
+                client_order_id=order_id,
+                exchange_order_id=exchange_order_id,
+                trading_pair=trading_pair,
+                order_type=order_type,
+                trade_type=trade_type,
+                amount=amount,
+                price=price,
+                creation_timestamp=self.current_timestamp
+            )
+        )
+
+    def stop_tracking_order(self, order_id: str):
+        """
+        Stops tracking an order
+
+        :param order_id: The id of the order that will not be tracked any more
+        """
+        self._order_tracker.stop_tracking_order(client_order_id=order_id)
+
+    async def _sleep(self, delay: float):
+        await asyncio.sleep(delay)
+
+    # Buy / Sell / Cancel Orders
+    # Get fee
     #
     def buy(self,
             trading_pair: str,
@@ -273,8 +259,12 @@ class ExchangeBaseV2(ExchangeBase):
             price=price))
         return order_id
 
-    def sell(self, trading_pair: str, amount: Decimal, order_type: OrderType = OrderType.MARKET,
-             price: Decimal = s_decimal_NaN, **kwargs) -> str:
+    def sell(self,
+             trading_pair: str,
+             amount: Decimal,
+             order_type: OrderType = OrderType.MARKET,
+             price: Decimal = s_decimal_NaN,
+             **kwargs) -> str:
         """
         Creates a promise to create a sell order using the parameters.
         :param trading_pair: the token pair to operate with
@@ -321,7 +311,11 @@ class ExchangeBaseV2(ExchangeBase):
 
         :return: the calculated or estimated fee
         """
-        return self._get_fee(base_currency, quote_currency, order_type, order_side, amount, price, is_maker)
+        try:
+            return self._api.get_fee(base_currency, quote_currency, order_type, order_side, amount, price, is_maker)
+        except NotImplementedError:
+            is_maker = order_type is OrderType.LIMIT_MAKER
+            return AddedToCostTradeFee(percent=self.estimate_fee_pct(is_maker))
 
     def cancel(self, trading_pair: str, order_id: str):
         """
@@ -332,7 +326,7 @@ class ExchangeBaseV2(ExchangeBase):
 
         :return: the client id of the order to cancel
         """
-        safe_ensure_future(self._execute_cancel(trading_pair, order_id))
+        safe_ensure_future(self._cancel_order(trading_pair, order_id))
         return order_id
 
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
@@ -344,7 +338,7 @@ class ExchangeBaseV2(ExchangeBase):
         :return: a list of CancellationResult instances, one for each of the orders to be cancelled
         """
         incomplete_orders = [o for o in self.in_flight_orders.values() if not o.is_done]
-        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id) for o in incomplete_orders]
+        tasks = [self._cancel_order(o.trading_pair, o.client_order_id) for o in incomplete_orders]
         order_id_set = set([o.client_order_id for o in incomplete_orders])
         successful_cancellations = []
 
@@ -356,14 +350,10 @@ class ExchangeBaseV2(ExchangeBase):
                         continue
 
                     client_order_id = None
-                    # Binance allows cancellations only by using its own order id, not ours
-                    # TODO this should go to an implementation specific method that is
-                    # overridden by Binance and in other cases where applicable
-                    if isinstance(cr, dict) and "origClientOrderId" in cr:
-                        client_order_id = cr.get("origClientOrderId")
                     if cr is not None:
                         if not client_order_id:
                             client_order_id = cr
+
                         order_id_set.remove(client_order_id)
                         successful_cancellations.append(CancellationResult(client_order_id, True))
         except Exception:
@@ -433,7 +423,7 @@ class ExchangeBaseV2(ExchangeBase):
             return
 
         try:
-            exchange_order_id, update_timestamp = await self._place_order(
+            exchange_order_id, update_timestamp = await self._api.create_order(
                 order_id=order_id,
                 trading_pair=trading_pair,
                 amount=amount,
@@ -468,7 +458,7 @@ class ExchangeBaseV2(ExchangeBase):
             self._order_tracker.process_order_update(order_update)
         return order_id, exchange_order_id
 
-    async def _execute_cancel(self, trading_pair: str, order_id: str) -> str:
+    async def _cancel_order(self, trading_pair: str, order_id: str) -> str:
         """
         Requests the exchange to cancel an active order
 
@@ -478,7 +468,7 @@ class ExchangeBaseV2(ExchangeBase):
         tracked_order = self._order_tracker.fetch_tracked_order(order_id)
         if tracked_order is not None:
             try:
-                cancelled = await self._place_cancel(order_id, tracked_order)
+                client_order_id, cancelled = await self._api.cancel_order(order_id, tracked_order)
                 if cancelled:
                     order_update: OrderUpdate = OrderUpdate(
                         client_order_id=order_id,
@@ -501,98 +491,27 @@ class ExchangeBaseV2(ExchangeBase):
                     f"Failed to cancel order {order_id}", exc_info=True)
         return None
 
-    # Order Tracking
+    # lower level API interaction methods
     #
     @property
-    def tracking_states(self) -> Dict[str, any]:
+    def ready(self) -> bool:
         """
-        Returns a dictionary associating current active orders client id to their JSON representation
+        Returns True if the connector is ready to operate (all connections established with the exchange). If it is
+        not ready it returns False.
         """
-        return {
-            key: value.to_json()
-            for key, value in self.in_flight_orders.items()
-            if not value.is_done
-        }
-
-    def restore_tracking_states(self, saved_states: Dict[str, Any]):
-        """
-        Restore in-flight orders from saved tracking states, this is st the connector can pick up on where it left off
-        when it disconnects.
-
-        :param saved_states: The saved tracking_states.
-        """
-        self._order_tracker.restore_tracking_states(tracking_states=saved_states)
-
-    def start_tracking_order(self,
-                             order_id: str,
-                             exchange_order_id: Optional[str],
-                             trading_pair: str,
-                             trade_type: TradeType,
-                             price: Decimal,
-                             amount: Decimal,
-                             order_type: OrderType):
-        """
-        Starts tracking an order by adding it to the order tracker.
-
-        :param order_id: the order identifier
-        :param exchange_order_id: the identifier for the order in the exchange
-        :param trading_pair: the token pair for the operation
-        :param trade_type: the type of order (buy or sell)
-        :param price: the price for the order
-        :param amount: the amount for the order
-        :param order_type: type of execution for the order (MARKET, LIMIT, LIMIT_MAKER)
-        """
-        self._order_tracker.start_tracking_order(
-            InFlightOrder(
-                client_order_id=order_id,
-                exchange_order_id=exchange_order_id,
-                trading_pair=trading_pair,
-                order_type=order_type,
-                trade_type=trade_type,
-                amount=amount,
-                price=price,
-                creation_timestamp=self.current_timestamp
-            )
-        )
-
-    def stop_tracking_order(self, order_id: str):
-        """
-        Stops tracking an order
-
-        :param order_id: The id of the order that will not be tracked any more
-        """
-        self._order_tracker.stop_tracking_order(client_order_id=order_id)
-
-    async def _sleep(self, delay: float):
-        await asyncio.sleep(delay)
+        return all(self._api.status_dict.values())
 
     @property
-    def name_cap(self) -> str:
-        return self.name.capitalize()
+    def status_dict(self):
+        return self._api.status_dict
 
-    # Implementation-specific methods
-    #
-    def name(self):
-        raise NotImplementedError
-
-    def init_auth(self):
-        raise NotImplementedError
-
-    def _place_cancel(self):
-        raise NotImplementedError
-
-    def _place_order(self):
-        raise NotImplementedError
-
-    def _get_fee(self):
-        raise NotImplementedError
-
-    # Network-API-related code
-    #
-
-    # overridden in implementation of exchanges
-    #
-    web_utils = None
+    def tick(self, timestamp: float):
+        """
+        Includes the logic that has to be processed every time a new tick happens in the bot. Particularly it enables
+        the execution of the status update polling loop using an event.
+        """
+        self._api.tick(timestamp)
+        self._last_timestamp = timestamp
 
     async def start_network(self):
         """
@@ -602,214 +521,137 @@ class ExchangeBaseV2(ExchangeBase):
         - The polling loop to update order status and balance status using REST API (backup for main update process)
         - The background task to process the events received through the user stream tracker (websocket connection)
         """
-        self._stop_network()
-        self._order_book_tracker.start()
-        self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
-        self._trading_fees_polling_task = safe_ensure_future(self._trading_fees_polling_loop())
-        if self._trading_required:
-            self._status_polling_task = safe_ensure_future(self._status_polling_loop())
-            self._user_stream_tracker_task = safe_ensure_future(self._user_stream_tracker.start())
-            self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
+        await self._api.start_network()
+        self._api_listener_task = safe_ensure_future(self._api_listener_loop())
 
     def _stop_network(self):
         # Resets timestamps and events for status_polling_loop
-        self._last_poll_timestamp = 0
         self._last_timestamp = 0
-        self._poll_notifier = asyncio.Event()
-
-        self._order_book_tracker.stop()
-        if self._status_polling_task is not None:
-            self._status_polling_task.cancel()
-            self._status_polling_task = None
-        if self._trading_rules_polling_task is not None:
-            self._trading_rules_polling_task.cancel()
-            self._trading_rules_polling_task = None
-        if self._trading_fees_polling_task is not None:
-            self._trading_fees_polling_task.cancel()
-            self._trading_fees_polling_task = None
-        if self._user_stream_tracker_task is not None:
-            self._user_stream_tracker_task.cancel()
-            self._user_stream_tracker_task = None
-        if self._user_stream_event_listener_task is not None:
-            self._user_stream_event_listener_task.cancel()
-            self._user_stream_event_listener_task = None
+        self._api._stop_network()
+        if self._api_listener_task is not None:
+            self._api_listener_task.cancel()
+            self._api_listener_task = None
 
     async def stop_network(self):
         """
-        This function is executed when the connector is stopped. It perform a general cleanup and stops all background
-        tasks that require the connection with the exchange to work.
+        This function is executed when the connector is stopped.
+        It stops all background tasks that connect to the exchange.
         """
         self._stop_network()
 
-    async def check_network(self) -> NetworkStatus:
+    async def check_network(self):
         """
-        Checks connectivity with the exchange using the API
+        Checks connectivity with the exchange using the API.
         """
-        try:
-            await self._api_get(path_url=self.CHECK_NETWORK_URL)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return NetworkStatus.NOT_CONNECTED
-        return NetworkStatus.CONNECTED
+        return await self._api.check_network()
 
-    # loops and sync related methods
-    #
-    async def _trading_rules_polling_loop(self):
-        """
-        Updates the trading rules by requesting the latest definitions from the exchange.
-        Executes regularly every 30 minutes
-        """
-        while True:
+    async def _api_listener_loop(self):
+        async for event in self._iter_api_queue():
             try:
-                await safe_gather(self._update_trading_rules())
-                await asyncio.sleep(self.TRADING_RULES_INTERVAL)
+                if event["type"] == "trade":
+                    self._process_trade(event)
+                if event["type"] == "order":
+                    self._process_order(event)
+                if event["type"] == "balance":
+                    self._process_balance(event)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().network(
-                    "Unexpected error while fetching trading rules.", exc_info=True,
-                    app_warning_msg=f"Could not fetch new trading rules from {self.name_cap}"
-                                    " Check network connection.")
-                await asyncio.sleep(0.5)
+                self.logger().error(
+                    "Unexpected error in API listener loop. Retrying in 5s.",
+                    exc_info=True)
+                await self._sleep(5)
 
-    async def _trading_fees_polling_loop(self):
-        """
-        Only some exchanges provide a fee endpoint.
-        If _update_trading_fees() is not defined, we just exit the loop
-        """
+    async def _iter_api_queue(self) -> AsyncIterable[Dict[str, any]]:
         while True:
             try:
-                await safe_gather(self._update_trading_fees())
-                await self._sleep(self.TRADING_FEES_INTERVAL)
-            except NotImplementedError:
-                return
+                yield await self._api.queue.get()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().network(
-                    "Unexpected error while fetching trading fees.", exc_info=True,
-                    app_warning_msg=f"Could not fetch new trading fees from {self.name_cap}."
-                                    " Check network connection.")
-                await self._sleep(0.5)
+                self.logger().exception("Error while reading API queue. Retrying in 1s.")
+                await asyncio.sleep(1)
 
-    async def _status_polling_loop(self):
+    def _process_trade(self, trade: Dict[str, Any], client_order_id: Optional[str] = None):
         """
-        Performs all required operation to keep the connector updated and synchronized with the exchange.
-        It contains the backup logic to update status using API requests in case the main update source
-        (the user stream data source websocket) fails.
-        It also updates the time synchronizer. This is necessary because the exchange requires
-        the time of the client to be the same as the time in the exchange.
-        Executes when the _poll_notifier event is enabled by the `tick` function.
+        Updates in-flight order and trigger order filled event for trade message received. Triggers order completed
+        event if the total executed amount equals to the specified order amount.
+        Example Trade:
+        https://www.gate.io/docs/apiv4/en/#retrieve-market-trades
         """
-        while True:
-            try:
-                await self._poll_notifier.wait()
-                await self._update_time_synchronizer()
+        client_order_id = client_order_id or str(trade["text"])
+        tracked_order = self.in_flight_orders.get(client_order_id, None)
+        if not tracked_order:
+            self.logger().debug(f"Ignoring trade message with id {client_order_id}: not in in_flight_orders.")
+            return
 
-                # the following method is implementation-specific
-                await self._status_polling_loop_fetch_updates()
+        fee = TradeFeeBase.new_spot_fee(
+            fee_schema=self.trade_fee_schema(),
+            trade_type=tracked_order.trade_type,
+            percent_token=trade["fee_currency"],
+            flat_fees=[TokenAmount(
+                amount=Decimal(trade["fee_amount"]),
+                token=trade["fee_currency"]
+            )]
+        )
+        trade_update = TradeUpdate(
+            trade_id=str(trade["id"]),
+            client_order_id=tracked_order.client_order_id,
+            exchange_order_id=tracked_order.exchange_order_id,
+            trading_pair=tracked_order.trading_pair,
+            fee=fee,
+            fill_base_amount=Decimal(trade["fill_base_amount"]),
+            fill_quote_amount=Decimal(trade["fill_quote_amount"]),
+            fill_price=Decimal(trade["fill_price"]),
+            fill_timestamp=trade["fill_timestamp"],
+        )
+        self._order_tracker.process_trade_update(trade_update)
 
-                self._last_poll_timestamp = self.current_timestamp
-                self._poll_notifier = asyncio.Event()
-            except asyncio.CancelledError:
-                raise
-            except NotImplementedError:
-                raise
-            except Exception:
-                self.logger().network(
-                    "Unexpected error while fetching account updates.",
-                    exc_info=True,
-                    app_warning_msg=f"Could not fetch account updates from {self.name_cap}. "
-                                    "Check API key and network connection.")
-                await self._sleep(0.5)
+    def _process_order(self, order_msg: Dict[str, Any]):
+        """
+        Updates in-flight order and triggers cancellation or failure event if needed.
 
-    async def _update_time_synchronizer(self):
-        try:
-            await self._time_synchronizer.update_server_time_offset_with_time_provider(
-                time_provider=self.web_utils.get_current_server_time(
-                    throttler=self._throttler,
-                    domain=self._domain,
-                )
+        :param order_msg: The order response from either REST or web socket API (they are of the same format)
+
+        Example Order:
+        https://www.gate.io/docs/apiv4/en/#list-orders
+        """
+        state = None
+        client_order_id = str(order_msg.get("text", ""))
+        tracked_order = self.in_flight_orders.get(client_order_id, None)
+        if not tracked_order:
+            self.logger().debug(f"Ignoring order message with id {client_order_id}: not in in_flight_orders.")
+            return
+
+        state = self._normalise_order_message_state(order_msg, tracked_order)
+        if state:
+            order_update = OrderUpdate(
+                trading_pair=tracked_order.trading_pair,
+                update_timestamp=order_msg["update_timestamp"],
+                new_state=order_msg["state"],
+                client_order_id=client_order_id,
+                exchange_order_id=str(order_msg["id"]),
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            self.logger().exception(f"Error requesting time from {self.name_cap} server")
-            raise
+            self._order_tracker.process_order_update(order_update=order_update)
+            self.logger().info(f"Successfully updated order {tracked_order.client_order_id}.")
 
-    async def _iter_user_event_queue(self) -> AsyncIterable[Dict[str, any]]:
-        """
-        Called by _user_stream_event_listener.
-        """
-        while True:
-            try:
-                yield await self._user_stream_tracker.user_stream.get()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().exception("Error while reading user events queue. Retrying in 1s.")
-                await asyncio.sleep(1.0)
+    # TODO
+    def _process_balance(self, balance_update):
+        local_asset_names = set(self._account_balances.keys())
+        remote_asset_names = set()
+        for account in balance_update["accounts"]:
+            asset_name = account["currency"]
+            self._account_available_balances[asset_name] = Decimal(str(account["available"]))
+            self._account_balances[asset_name] = Decimal(str(account["locked"])) + Decimal(str(account["available"]))
+            remote_asset_names.add(asset_name)
+        asset_names_to_remove = local_asset_names.difference(remote_asset_names)
+        for asset_name in asset_names_to_remove:
+            del self._account_available_balances[asset_name]
+            del self._account_balances[asset_name]
 
-    # Exchange / Trading logic methods
-    # that call the API
-    #
-    async def _update_trading_rules(self):
-        exchange_info = await self._api_get(path_url=self.SYMBOLS_PATH_URL)
-        trading_rules_list = await self._format_trading_rules(exchange_info)
-        self._trading_rules.clear()
-        for trading_rule in trading_rules_list:
-            self._trading_rules[trading_rule.trading_pair] = trading_rule
-
-    async def _api_get(self, *args, **kwargs):
-        kwargs["method"] = RESTMethod.GET
-        return await self._api_request(*args, **kwargs)
-
-    async def _api_post(self, *args, **kwargs):
-        kwargs["method"] = RESTMethod.POST
-        return await self._api_request(*args, **kwargs)
-
-    async def _api_put(self, *args, **kwargs):
-        kwargs["method"] = RESTMethod.PUT
-        return await self._api_request(*args, **kwargs)
-
-    async def _api_delete(self, *args, **kwargs):
-        kwargs["method"] = RESTMethod.DELETE
-        return await self._api_request(*args, **kwargs)
-
-    async def _api_request(self,
-                           path_url,
-                           method: RESTMethod = RESTMethod.GET,
-                           params: Optional[Dict[str, Any]] = None,
-                           data: Optional[Dict[str, Any]] = None,
-                           is_auth_required: bool = False,
-                           limit_id: Optional[str] = None) -> Dict[str, Any]:
-
-        return await self.web_utils.api_request(
-            path=path_url,
-            api_factory=self._api_factory,
-            throttler=self._throttler,
-            time_synchronizer=self._time_synchronizer,
-            domain=self._domain,
-            params=params,
-            data=data,
-            method=method,
-            is_auth_required=is_auth_required,
-            limit_id=limit_id)
-
-    # Methods tied to specific API data formats
-    #
-    async def _update_trading_fees(self):
-        raise NotImplementedError
-
-    def _user_stream_event_listener(self):
-        raise NotImplementedError
-
-    def _format_trading_rules(self):
-        raise NotImplementedError
-
-    def _update_order_status(self):
-        raise NotImplementedError
-
-    def _update_balances(self):
-        raise NotImplementedError
+    # TODO
+    def _process_balance_message_ws(self, balance_update):
+        for account in balance_update["accounts"]:
+            asset_name = account["currency"]
+            self._account_available_balances[asset_name] = Decimal(str(account["available"]))
+            self._account_balances[asset_name] = Decimal(str(account["total"]))

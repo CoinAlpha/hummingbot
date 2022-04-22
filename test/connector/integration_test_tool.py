@@ -134,7 +134,7 @@ def get_gate_io(ec):
         gate_io_secret_key=creds.s,
         trading_pairs=[ec.pair],
     )
-    exchange.ORDERBOOK_DS_CLASS._trading_pair_symbol_map = {
+    exchange._api.ORDERBOOK_DS_CLASS._trading_pair_symbol_map = {
         exchange.DEFAULT_DOMAIN: bidict({f"{ec.base}{ec.quote}": ec.pair})
     }
     return exchange
@@ -157,12 +157,12 @@ class ExchangeClient(object):
             obj.logger().addHandler(self)
         objs = (
             self.exchange,
-            self.exchange._time_synchronizer,
             self.exchange._order_tracker,
-            self.exchange._user_stream_tracker,
-            self.exchange._order_book_tracker,
-            self.exchange._userstream_ds,
-            self.exchange._orderbook_ds,
+            self.exchange._api._time_synchronizer,
+            self.exchange._api._user_stream_tracker,
+            self.exchange._api._order_book_tracker,
+            self.exchange._api._userstream_ds,
+            self.exchange._api._orderbook_ds,
         )
         for obj in objs:
             config_logger(obj)
@@ -191,8 +191,8 @@ class ExchangeClient(object):
             ts = time.time()
             self.exchange.tick(ts)
             debug_msg = f"ticking {ts}\n" \
-                        f"UST recv time: {self.exchange._user_stream_tracker.last_recv_time}\n" \
-                        f"OBT recv time: {self.exchange._user_stream_tracker.last_recv_time}\n"
+                        f"UST recv time: {self.exchange._api._user_stream_tracker.last_recv_time}\n" \
+                        f"OBT recv time: {self.exchange._api._user_stream_tracker.last_recv_time}\n"
             self.debug(debug_msg)
             await asyncio.sleep(1)
 
@@ -213,8 +213,8 @@ class ExchangeClient(object):
 
         # self.exchange = get_binance(self)
         self.exchange = get_gate_io(self)
-        self.exchange._time_synchronizer.add_time_offset_ms_sample(0)
-        self.exchange._user_stream_tracker._user_stream = PrintingQueue()
+        self.exchange._api._time_synchronizer.add_time_offset_ms_sample(0)
+        self.exchange._api._user_stream_tracker._user_stream = PrintingQueue()
 
         self.initialize_exchange_loggers()
         self.initialize_event_loggers()
@@ -245,7 +245,7 @@ class ExchangeClient(object):
             print(f'\n{r}')
             if r == NetworkStatus.CONNECTED:
                 print("Exchange status: ", self.exchange.status_dict)
-                print("Trading pair symbol map from OB DS: ", self.exchange._orderbook_ds._trading_pair_symbol_map)
+                print("Trading pair symbol map from OB DS: ", self.exchange._api._orderbook_ds._trading_pair_symbol_map)
                 print('\n')
                 break
 

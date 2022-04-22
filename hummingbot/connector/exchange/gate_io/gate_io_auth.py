@@ -17,10 +17,13 @@ class GateIoAuth(AuthBase):
     Auth Gate.io API
     https://www.gate.io/docs/apiv4/en/#authentication
     """
-    def __init__(self, api_key: str, secret_key: str, time_provider: TimeSynchronizer):
+    def __init__(self,
+                 gate_io_api_key: str = "",
+                 gate_io_secret_key: str = "",
+                 time_provider: TimeSynchronizer = None):
         self.nonce = None
-        self.api_key = api_key
-        self.secret_key = secret_key
+        self.api_key = gate_io_api_key
+        self.secret_key = gate_io_secret_key
         self.time_provider = time_provider
 
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:
