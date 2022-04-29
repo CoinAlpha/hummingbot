@@ -1,20 +1,20 @@
 #!/usr/bin/env python
 import asyncio
 import logging
-from typing import Any, AsyncIterable, List, Optional
+from typing import Any, AsyncIterable, Optional, List
 
 from hummingbot.connector.exchange.gate_io import gate_io_constants as CONSTANTS
+from hummingbot.connector.time_synchronizer import TimeSynchronizer
+from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.logger import HummingbotLogger
 
 from .gate_io_auth import GateIoAuth
-from .gate_io_utils import GateIoAPIError, convert_to_exchange_trading_pair
-from .gate_io_websocket import GateIoWebsocket
+from . import gate_io_web_utils as web_utils
 
 
 class GateIoAPIUserStreamDataSource(UserStreamTrackerDataSource):
-
     _logger: Optional[HummingbotLogger] = None
 
     @classmethod
@@ -23,16 +23,17 @@ class GateIoAPIUserStreamDataSource(UserStreamTrackerDataSource):
             cls._logger = logging.getLogger(__name__)
         return cls._logger
 
-    def __init__(
-        self,
-        gate_io_auth: GateIoAuth,
-        trading_pairs: Optional[List[str]] = None,
-        api_factory: Optional[WebAssistantsFactory] = None,
-    ):
+    def __init__(self,
+                 auth,
+                 domain: str,
+                 trading_pairs: List[str],
+                 api_factory: Optional[WebAssistantsFactory] = None,
+                 throttler: Optional[AsyncThrottler] = None,
+                 time_synchronizer: Optional[TimeSynchronizer] = None):
         self._api_factory = api_factory
-        self._gate_io_auth: GateIoAuth = gate_io_auth
-        self._ws: Optional[GateIoWebsocket] = None
-        self._trading_pairs = trading_pairs or []
+        self._auth: GateIoAuth = auth
+        self._ws: Optional[web_utils.GateIoWebsocket] = None
+        self._trading_pairs: List[str] = trading_pairs
         self._current_listen_key = None
         self._listen_for_user_stream_task = None
         super().__init__()
@@ -48,26 +49,21 @@ class GateIoAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         Subscribe to active orders via web socket
         """
-
         try:
-            self._ws = GateIoWebsocket(self._gate_io_auth, self._api_factory)
-
+            self._ws = web_utils.GateIoWebsocket(self._auth, self._api_factory)
             await self._ws.connect()
-
             user_channels = [
                 CONSTANTS.USER_TRADES_ENDPOINT_NAME,
                 CONSTANTS.USER_ORDERS_ENDPOINT_NAME,
                 CONSTANTS.USER_BALANCE_ENDPOINT_NAME,
             ]
-
             await self._ws.subscribe(CONSTANTS.USER_TRADES_ENDPOINT_NAME,
-                                     [convert_to_exchange_trading_pair(pair) for pair in self._trading_pairs])
+                                     [web_utils.convert_to_exchange_trading_pair(pair) for pair in self._trading_pairs])
             await self._ws.subscribe(CONSTANTS.USER_ORDERS_ENDPOINT_NAME,
-                                     [convert_to_exchange_trading_pair(pair) for pair in self._trading_pairs])
+                                     [web_utils.convert_to_exchange_trading_pair(pair) for pair in self._trading_pairs])
             await self._ws.subscribe(CONSTANTS.USER_BALANCE_ENDPOINT_NAME)
 
             async for msg in self._ws.on_message():
-
                 if msg.get("event") in ["subscribe", "unsubscribe"]:
                     continue
                 if msg.get("result", None) is None:
@@ -79,7 +75,7 @@ class GateIoAPIUserStreamDataSource(UserStreamTrackerDataSource):
         finally:
             if self._ws is not None:
                 await self._ws.disconnect()
-            await asyncio.sleep(5)
+            await self._sleep(5)
 
     async def listen_for_user_stream(self, output: asyncio.Queue):
         """
@@ -95,11 +91,11 @@ class GateIoAPIUserStreamDataSource(UserStreamTrackerDataSource):
                     output.put_nowait(msg)
             except asyncio.CancelledError:
                 raise
-            except GateIoAPIError as e:
+            except web_utils.APIError as e:
                 self.logger().error(e.error_message, exc_info=True)
                 raise
             except Exception:
                 self.logger().error(
                     f"Unexpected error with {CONSTANTS.EXCHANGE_NAME} WebSocket connection. "
                     "Retrying after 30 seconds...", exc_info=True)
-                await asyncio.sleep(30.0)
+                await self._sleep(30)
