@@ -142,8 +142,10 @@ class GatewayCommand:
                     self.app.to_stop_config = False
                     return
 
-                # Eth gas station prompt
-                setup_gas_station = await self.app.prompt(prompt="Would you like to setup EthGasStation(ethgasstation.info)? (Yes/No) >>> ")
+                # Eth gas station prompt defaults
+                gas_station_key = None
+                gas_station_speed = "fast"
+                setup_gas_station = await self.app.prompt(prompt="Would you like to setup EthGasStation - ethgasstation.info ? (Yes/No) >>> ")
                 if setup_gas_station in ["Y", "y", "Yes", "yes"]:
                     gas_station_key: str = await self.app.prompt(prompt="Enter EthGasStation API Key >>> ")
                     self.app.clear_input()
