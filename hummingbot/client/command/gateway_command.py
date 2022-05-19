@@ -143,12 +143,22 @@ class GatewayCommand:
                     return
 
                 # Eth gas station prompt
-                gas_station_key: str = await self.app.prompt(prompt="Enter Eth-Gas-Station(ethgasstation.info) API Key if you have one, "
-                                                                    "or hit ENTER to continue  >>> ")
-                self.app.clear_input()
-                if self.app.to_stop_config:
-                    self.app.to_stop_config = False
-                    return
+                setup_gas_station = await self.app.prompt(prompt="Would you like to setup EthGasStation(ethgasstation.info)? (Yes/No) >>> ")
+                if setup_gas_station in ["Y", "y", "Yes", "yes"]:
+                    gas_station_key: str = await self.app.prompt(prompt="Enter EthGasStation API Key >>> ")
+                    self.app.clear_input()
+                    if self.app.to_stop_config:
+                        self.app.to_stop_config = False
+                        return
+
+                    gas_station_speed: str = await self.app.prompt(prompt="Enter EthGasStation speed. (safeLow/average/fast/fastest)  >>> ")
+                    if gas_station_speed not in ["safeLow", "average", "fast", "fastest"]:
+                        self.notify("Invalid speed response. Defaulting to 'fast' speed.")
+                        gas_station_speed = "fast"
+                    self.app.clear_input()
+                    if self.app.to_stop_config:
+                        self.app.to_stop_config = False
+                        return
 
                 try:
                     # Verifies that the Infura API Key/Project ID is valid by sending a request
@@ -172,7 +182,7 @@ class GatewayCommand:
 
                     exec_info = await docker_ipc(method_name="exec_create",
                                                  container=container_id,
-                                                 cmd=f"./setup/generate_conf.sh {conf_path} {node_api_key} {gas_station_key}",
+                                                 cmd=f"./setup/generate_conf.sh {conf_path} {node_api_key} {gas_station_key} {gas_station_speed}",
                                                  user="hummingbot")
 
                     await docker_ipc(method_name="exec_start",
