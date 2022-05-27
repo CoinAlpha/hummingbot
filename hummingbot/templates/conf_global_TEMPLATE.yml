@@ -3,7 +3,7 @@
 #################################
 
 # For more detailed information: https://docs.hummingbot.io
-template_version: 35
+template_version: 36
 
 # Exchange configs
 
@@ -285,6 +285,9 @@ error-label: "#FF0000"
 
 # tabulate table format style (https://github.com/astanin/python-tabulate#table-format)
 tables_format: 'psql'
+
+# Controller server port
+controller_server_port: "50051"
 
 # previously imported strategy
 previous_strategy:

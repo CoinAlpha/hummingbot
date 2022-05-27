@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package hummingbot_controller;
+
+/* An adapter to the HummingbotController that exposes its functionality over
+ * an gRPC interface.*/
+service HummingbotController {
+  // Exposes the client start command.
+  rpc start_command (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  // Exposes the client stop command.
+  rpc stop_command (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+  // Exposes the client exit command.
+  rpc exit_command (google.protobuf.Empty) returns (google.protobuf.Empty) {}
+}

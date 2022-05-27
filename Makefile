@@ -18,3 +18,10 @@ report_coverage:
 development-diff-cover:
 	coverage xml
 	diff-cover --compare-branch=origin/development coverage.xml
+
+RPC_PROTO_DIR = hummingbot/client/controller/rpc
+RPC_PROTO_TARGET = $(RPC_PROTO_DIR)/*.proto
+RPC_PROTO_OUT = hummingbot/client/controller/rpc
+
+rpc-protos:
+	python -m grpc_tools.protoc -I$(RPC_PROTO_DIR) --python_out=$(RPC_PROTO_OUT) --grpc_python_out=$(RPC_PROTO_OUT) $(RPC_PROTO_TARGET)

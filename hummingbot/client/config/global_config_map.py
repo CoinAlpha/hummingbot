@@ -318,6 +318,12 @@ main_config_map = {
                   required_if=lambda: False,
                   validator=lambda value: "Invalid format" if value not in tabulate_formats else None,
                   default="psql"),
+    "controller_server_port":
+        ConfigVar(key="controller_server_port",
+                  prompt=None,
+                  type_str="str",
+                  required_if=lambda: False,
+                  default="50051"),
 }
 
 key_config_map = connector_keys()

@@ -8,14 +8,13 @@ import os
 import pwd
 import subprocess
 from pathlib import Path
-from typing import (
-    Coroutine,
-    List,
-)
+from typing import Coroutine, List
 
+import grpc
 import path_util  # noqa: F401
 
-from bin.hummingbot import detect_available_port, UIStartListener
+from bin.docker_connection import fork_and_start
+from bin.hummingbot import UIStartListener, detect_available_port
 from hummingbot import init_logging
 from hummingbot.client.config.config_helpers import (
     all_configs_complete,
@@ -25,15 +24,16 @@ from hummingbot.client.config.config_helpers import (
 )
 from hummingbot.client.config.global_config_map import global_config_map
 from hummingbot.client.config.security import Security
+from hummingbot.client.controller.hummingbot_controller import HummingbotController
+from hummingbot.client.controller.rpc.hummingbot_controller_pb2_grpc import add_HummingbotControllerServicer_to_server
+from hummingbot.client.controller.rpc.hummingbot_controller_rpc_server import HummingbotControllerRPCServer
 from hummingbot.client.hummingbot_application import HummingbotApplication
-from hummingbot.client.settings import AllConnectorSettings, CONF_FILE_PATH
+from hummingbot.client.settings import CONF_FILE_PATH, AllConnectorSettings
 from hummingbot.client.ui import login_prompt
 from hummingbot.core.event.events import HummingbotUIEvent
 from hummingbot.core.gateway import start_existing_gateway_container
 from hummingbot.core.management.console import start_management_console
 from hummingbot.core.utils.async_utils import safe_gather
-
-from bin.docker_connection import fork_and_start
 
 
 class CmdlineParser(argparse.ArgumentParser):
@@ -52,6 +52,22 @@ class CmdlineParser(argparse.ArgumentParser):
                           required=False,
                           help="Try to automatically set config / logs / data dir permissions, "
                                "useful for Docker containers.")
+        self.add_argument("--controller", "-c",
+                          action="store_true",
+                          help="If set, the controller server will be started")
+
+
+async def start_controller(app: HummingbotApplication) -> grpc.aio.server:
+    server = grpc.aio.server()
+    controller = HummingbotController(app)
+    server_handler = HummingbotControllerRPCServer(controller)
+    add_HummingbotControllerServicer_to_server(server_handler, server)
+    port = global_config_map["controller_server_port"].value
+    listen_addr = f"[::]:{port}"
+    server.add_insecure_port(listen_addr)
+    logging.info("Starting controller server on %s", listen_addr)
+    await server.start()
+    return server
 
 
 def autofix_permissions(user_group_spec: str):
@@ -116,8 +132,16 @@ async def quick_start(args: argparse.Namespace):
     if global_config_map.get("debug_console").value:
         management_port: int = detect_available_port(8211)
         tasks.append(start_management_console(locals(), host="localhost", port=management_port))
+    controller_server = None
+    controller = None
+    if args.controller:
+        controller_server = await start_controller(hb)
 
     await safe_gather(*tasks)
+
+    if controller_server is not None:
+        await controller_server.stop(grace=None)
+        await controller_server.wait_for_termination()
 
 
 def main():
@@ -130,6 +154,8 @@ def main():
         args.config_file_name = os.environ["CONFIG_FILE_NAME"]
     if args.config_password is None and len(os.environ.get("CONFIG_PASSWORD", "")) > 0:
         args.config_password = os.environ["CONFIG_PASSWORD"]
+    if not args.controller and os.environ.get("CONTROLLER") is not None:
+        args.controller = os.environ.get("CONTROLLER")
 
     # If no password is given from the command line, prompt for one.
     if args.config_password is None:
