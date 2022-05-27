@@ -133,7 +133,6 @@ async def quick_start(args: argparse.Namespace):
         management_port: int = detect_available_port(8211)
         tasks.append(start_management_console(locals(), host="localhost", port=management_port))
     controller_server = None
-    controller = None
     if args.controller:
         controller_server = await start_controller(hb)
 
