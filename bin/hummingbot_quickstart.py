@@ -30,6 +30,7 @@ from hummingbot.client.controller.rpc.hummingbot_controller_rpc_server import Hu
 from hummingbot.client.hummingbot_application import HummingbotApplication
 from hummingbot.client.settings import CONF_FILE_PATH, AllConnectorSettings
 from hummingbot.client.ui import login_prompt
+from hummingbot.client.ui.style import load_style
 from hummingbot.core.event.events import HummingbotUIEvent
 from hummingbot.core.gateway import start_existing_gateway_container
 from hummingbot.core.management.console import start_management_console
@@ -158,7 +159,7 @@ def main():
 
     # If no password is given from the command line, prompt for one.
     if args.config_password is None:
-        if not login_prompt():
+        if not login_prompt(style=load_style()):
             return
 
     asyncio.get_event_loop().run_until_complete(quick_start(args))

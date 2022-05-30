@@ -21,7 +21,7 @@ RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py38_4.10.3-Linux-x86_64
     /bin/bash ~/miniconda.sh -b && \
     rm ~/miniconda.sh && \
     ~/miniconda3/bin/conda update -n base conda -y && \
-    ~/miniconda3/bin/conda clean -tipsy
+    ~/miniconda3/bin/conda clean -tipy
 
 # Dropping default ~/.bashrc because it will return if not running as interactive shell, thus not invoking PATH settings
 RUN :> ~/.bashrc
@@ -42,7 +42,7 @@ COPY --chown=hummingbot:hummingbot setup/environment-linux.yml setup/
 
 # ./install | create hummingbot environment
 RUN ~/miniconda3/bin/conda env create -f setup/environment-linux.yml && \
-    ~/miniconda3/bin/conda clean -tipsy && \
+    ~/miniconda3/bin/conda clean -tipy && \
     # clear pip cache
     rm -rf /home/hummingbot/.cache
 
@@ -128,7 +128,9 @@ COPY --from=builder --chown=hummingbot:hummingbot /home/ /home/
 # additional configs (sudo)
 COPY docker/etc /etc
 
+EXPOSE 50054/tcp
+
 # Setting bash as default shell because we have .bashrc with customized PATH (setting SHELL affects RUN, CMD and ENTRYPOINT, but not manual commands e.g. `docker run image COMMAND`!)
 SHELL [ "/bin/bash", "-lc" ]
 CMD /home/hummingbot/miniconda3/envs/$(head -1 setup/environment-linux.yml | cut -d' ' -f2)/bin/python3 bin/hummingbot_quickstart.py \
-    --auto-set-permissions $(id -u hummingbot):$(id -g hummingbot)
+    --controller --auto-set-permissions $(id -u hummingbot):$(id -g hummingbot)
