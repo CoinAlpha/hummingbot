@@ -105,7 +105,6 @@ create_instance () {
  -e CERTS_FOLDER="$CERTS_FOLDER" \
  -e GATEWAY_LOGS_FOLDER="$GATEWAY_LOGS_FOLDER" \
  -e GATEWAY_CONF_FOLDER="$GATEWAY_CONF_FOLDER" \
- -P \
  coinalpha/hummingbot:$TAG
 }
 

@@ -158,6 +158,7 @@ def main():
         args.controller = os.environ.get("CONTROLLER")
 
     # If no password is given from the command line, prompt for one.
+    asyncio.get_event_loop().run_until_complete(read_system_configs_from_yml())
     if args.config_password is None:
         if not login_prompt(style=load_style()):
             return
