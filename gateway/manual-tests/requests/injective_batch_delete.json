@@ -1,0 +1,8 @@
+{
+    "chain": "injective",
+    "network": "mainnet",
+    "connector": "injective",
+    "address": "$INJECTIVE_SUBACCOUNTID",
+    "market": "INJ-USDT",
+    "cancelOrderIds": ["0x73af517124c3f564d1d70e38ad5200dfc7101d04986c14df410042e00932d4bf", "0x8ce222ca5da95aaffd87b3d38a307f25d6e2c09e70a0cb8599bc6c8a0851fda3"]
+}
