@@ -1109,6 +1109,3 @@ class ExchangePyBase(ExchangeBase, ABC):
     async def _make_trading_pairs_request(self) -> Any:
         exchange_info = await self._api_get(path_url=self.trading_pairs_request_path)
         return exchange_info
-
-    def _is_user_stream_initialized(self):
-        return (self._user_stream_tracker.data_source.last_recv_time > 0 or not self.is_trading_required)
