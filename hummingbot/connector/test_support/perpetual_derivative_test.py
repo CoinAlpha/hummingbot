@@ -12,12 +12,14 @@ from hummingbot.connector.test_support.exchange_connector_test import AbstractEx
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, PositionSide, TradeType
 from hummingbot.core.data_type.funding_info import FundingInfo
 from hummingbot.core.data_type.in_flight_order import InFlightOrder
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import (
     BuyOrderCompletedEvent,
     BuyOrderCreatedEvent,
     FundingPaymentCompletedEvent,
     MarketEvent,
+    OrderCancelledEvent,
     OrderFilledEvent,
     SellOrderCompletedEvent,
     SellOrderCreatedEvent,
@@ -169,6 +171,21 @@ class AbstractPerpetualDerivativeTests:
                 position_action=position_action,
             )
             return order_id
+
+        def create_new_buy_order(
+            self,
+            amount: Decimal = Decimal("100"),
+            price: Decimal = Decimal("10_000"),
+            position_action: PositionAction = PositionAction.OPEN,
+        ) -> Order:
+            return Order(
+                trading_pair=self.trading_pair,
+                order_type=OrderType.LIMIT,
+                trade_type=TradeType.BUY,
+                amount=amount,
+                price=price,
+                kwargs={"position_action": position_action},
+            )
 
         def place_sell_order(
             self,
@@ -388,6 +405,83 @@ class AbstractPerpetualDerivativeTests:
                     f"{Decimal('100.000000')} to {PositionAction.CLOSE.name} a {self.trading_pair} position."
                 )
             )
+
+        @aioresponses()
+        def test_batch_order_update(self, mock_api):
+            """Open short position"""
+            self._simulate_trading_rules_initialized()
+            self.exchange._set_current_timestamp(1640780000)
+
+            self.exchange.start_tracking_order(
+                order_id=self.client_order_id_prefix + "1",
+                exchange_order_id=self.exchange_order_id_prefix + "1",
+                trading_pair=self.trading_pair,
+                trade_type=TradeType.BUY,
+                price=Decimal("10000"),
+                amount=Decimal("100"),
+                order_type=OrderType.LIMIT,
+            )
+            order_to_cancel: InFlightOrder = self.exchange.in_flight_orders[self.client_order_id_prefix + "1"]
+
+            self._setup_batch_order_update_responses(mock_api=mock_api, order_to_cancel=order_to_cancel)
+
+            leverage = 3
+            self.exchange._perpetual_trading.set_leverage(trading_pair=self.trading_pair, leverage=leverage)
+            new_buy_order = self.create_new_buy_order()
+            existing_order_to_cancel = Order.from_in_flight_order(in_flight_order=order_to_cancel)
+            orders: Tuple[Order] = self.exchange.batch_order_update(
+                orders_to_create=(new_buy_order,), orders_to_cancel=(existing_order_to_cancel,)
+            )
+
+            self.assertEqual(1, len(orders))
+
+            new_order_id = orders[0].client_order_id
+
+            self._await_batch_order_update_sent()
+
+            self._validate_batch_order_update_requests(
+                mock_api=mock_api,
+                new_order=self.exchange.in_flight_orders[new_order_id],
+                order_to_cancel=order_to_cancel,
+            )
+
+            self.assertIn(new_order_id, self.exchange.in_flight_orders)
+
+            create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
+            self.assertEqual(self.exchange.current_timestamp, create_event.timestamp)
+            self.assertEqual(self.trading_pair, create_event.trading_pair)
+            self.assertEqual(OrderType.LIMIT, create_event.type)
+            self.assertEqual(Decimal("100"), create_event.amount)
+            self.assertEqual(Decimal("10000"), create_event.price)
+            self.assertEqual(new_order_id, create_event.order_id)
+            self.assertEqual(str(self.expected_exchange_order_id), create_event.exchange_order_id)
+            self.assertEqual(leverage, create_event.leverage)
+            self.assertEqual(PositionAction.OPEN.value, create_event.position)
+
+            self.assertTrue(
+                self.is_logged(
+                    "INFO",
+                    f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_id} for "
+                    f"{Decimal('100.000000')} to {PositionAction.OPEN.name} a {self.trading_pair} position."
+                )
+            )
+
+            if self.is_cancel_request_executed_synchronously_by_server:
+                self.assertNotIn(order_to_cancel.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel.is_cancelled)
+                cancel_event: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
+                self.assertEqual(self.exchange.current_timestamp, cancel_event.timestamp)
+                self.assertEqual(order_to_cancel.client_order_id, cancel_event.order_id)
+
+                self.assertTrue(
+                    self.is_logged(
+                        "INFO",
+                        f"Successfully canceled order {order_to_cancel.client_order_id}."
+                    )
+                )
+            else:
+                self.assertIn(order_to_cancel.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel.is_pending_cancel_confirmation)
 
         @aioresponses()
         def test_update_order_status_when_filled(self, mock_api):

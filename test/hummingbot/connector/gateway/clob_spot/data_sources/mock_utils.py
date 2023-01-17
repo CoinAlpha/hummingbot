@@ -201,6 +201,39 @@ class InjectiveClientMock:
             asyncio.wait_for(fut=self.cancel_order_called_event.wait(), timeout=timeout)
         )
 
+    def configure_batch_order_update_response(
+        self,
+        timestamp: int,
+        transaction_hash: str,
+        created_order: InFlightOrder,
+        canceled_order: InFlightOrder,
+    ):
+        def update_and_return(*_, **__):
+            self.place_order_called_event.set()
+            return {
+                "network": "injective",
+                "timestamp": timestamp,
+                "latency": 2,
+                "txHash": transaction_hash if not transaction_hash.startswith("0x") else transaction_hash[2:],
+            }
+
+        self.gateway_instance_mock.clob_batch_order_update.side_effect = update_and_return
+        self.configure_get_tx_by_hash_creation_response(
+            timestamp=timestamp, success=True, order_hash=created_order.exchange_order_id
+        )
+        self.configure_get_historical_spot_orders_response_for_in_flight_order(
+            timestamp=timestamp,
+            in_flight_order=created_order,
+        )
+        self.configure_get_historical_spot_orders_response_for_in_flight_order(
+            timestamp=timestamp,
+            in_flight_order=canceled_order,
+            is_canceled=True,
+        )
+        self.injective_compute_order_hashes_mock.return_value = OrderHashResponse(
+            spot=[created_order.exchange_order_id], derivative=[]
+        )
+
     def configure_place_order_response(
         self,
         timestamp: int,

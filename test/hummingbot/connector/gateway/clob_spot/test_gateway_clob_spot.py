@@ -1,8 +1,7 @@
 import asyncio
 import unittest
 from decimal import Decimal
-from test.hummingbot.connector.gateway.clob_spot.data_sources.mock_utils import InjectiveClientMock
-from typing import Awaitable, Dict, List, Mapping
+from typing import Awaitable, Dict, List, Mapping, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from hummingbot.client.config.client_config_map import ClientConfigMap
@@ -10,6 +9,7 @@ from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from hummingbot.client.config.fee_overrides_config_map import init_fee_overrides_config
 from hummingbot.client.config.trade_fee_schema_loader import TradeFeeSchemaLoader
 from hummingbot.client.settings import AllConnectorSettings
+from hummingbot.core.data_type.order import Order
 from hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_api_data_source import (
     InjectiveAPIDataSource,
 )
@@ -35,6 +35,7 @@ from hummingbot.core.event.events import (
 )
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.tracking_nonce import NonceCreator
+from test.hummingbot.connector.gateway.clob_spot.data_sources.mock_utils import InjectiveClientMock
 
 
 class GatewayCLOBSPOTTest(unittest.TestCase):
@@ -719,6 +720,64 @@ class GatewayCLOBSPOTTest(unittest.TestCase):
         self.assertEqual(2, len(cancellation_results))
         self.assertIn(CancellationResult(order1.client_order_id, True), cancellation_results)
         self.assertIn(CancellationResult(order2.client_order_id, False), cancellation_results)
+
+    def test_batch_order_update(self):
+        self.exchange._set_current_timestamp(self.start_timestamp)
+
+        self.exchange.start_tracking_order(
+            order_id="11",
+            exchange_order_id=self.expected_exchange_order_id,
+            trading_pair=self.trading_pair,
+            trade_type=TradeType.BUY,
+            price=self.expected_order_price,
+            amount=self.expected_order_size,
+            order_type=OrderType.LIMIT,
+        )
+
+        self.assertIn("11", self.exchange.in_flight_orders)
+        order_to_cancel: InFlightOrder = self.exchange.in_flight_orders["11"]
+
+        self.clob_data_source_mock.configure_batch_order_response()
+
+        new_buy_order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("100"),
+            price=Decimal("10_000"),
+        )
+        existing_order_to_cancel = Order.from_in_flight_order(in_flight_order=order_to_cancel)
+        orders: Tuple[Order] = self.exchange.batch_order_update(
+            orders_to_create=(new_buy_order,), orders_to_cancel=(existing_order_to_cancel,)
+        )
+
+        self.assertEqual(1, len(orders))
+
+        new_order_id = orders[0].client_order_id
+
+        self.clob_data_source_mock.run_until_all_items_delivered()
+
+        self.assertIn(new_order_id, self.exchange.in_flight_orders)
+
+        create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
+        self.assertEqual(self.exchange.current_timestamp, create_event.timestamp)
+        self.assertEqual(self.trading_pair, create_event.trading_pair)
+        self.assertEqual(OrderType.LIMIT, create_event.type)
+        self.assertEqual(Decimal("100"), create_event.amount)
+        self.assertEqual(Decimal("10000"), create_event.price)
+        self.assertEqual(new_order_id, create_event.order_id)
+        self.assertEqual(str(self.expected_exchange_order_id), create_event.exchange_order_id)
+
+        self.assertTrue(
+            self.is_logged(
+                "INFO",
+                f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_id} for "
+                f"{Decimal('100.000000')} {self.trading_pair}."
+            )
+        )
+
+        self.assertIn(order_to_cancel.client_order_id, self.exchange.in_flight_orders)
+        self.assertTrue(order_to_cancel.is_pending_cancel_confirmation)
 
     def test_update_balances(self):
         expected_base_total_balance = Decimal("100")

@@ -4,7 +4,7 @@ import time
 from asyncio import Lock
 from decimal import Decimal
 from math import floor
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from bidict import bidict
 from grpc.aio import UnaryStreamCall
@@ -27,7 +27,7 @@ from pyinjective.proto.injective.exchange.v1beta1.exchange_pb2 import Derivative
 
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import (
-    GatewayCLOBAPIDataSourceBase,
+    BatchOrderUpdateResult, CancelOrderResult, GatewayCLOBAPIDataSourceBase, PlaceOrderResult,
 )
 from hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_constants import (
     ACC_NONCE_PATH_RATE_LIMIT_ID,
@@ -165,7 +165,7 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
 
     async def place_order(
         self, order: GatewayInFlightOrder, **kwargs
-    ) -> Tuple[Optional[str], Dict[str, Any]]:
+    ) -> PlaceOrderResult:
         market = self._trading_pair_to_active_spot_markets[order.trading_pair]
         spot_order_to_create = [
             self._composer.SpotOrder(
@@ -208,10 +208,17 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
         misc_updates = {
             "creation_transaction_hash": transaction_hash,
         }
+        result = PlaceOrderResult(
+            success=True,
+            client_order_id=order.client_order_id,
+            exchange_order_id=order_hash,
+            trading_pair=order.trading_pair,
+            misc_updates=misc_updates,
+        )
 
-        return order_hash, misc_updates
+        return result
 
-    async def cancel_order(self, order: GatewayInFlightOrder) -> Tuple[bool, Dict[str, Any]]:
+    async def cancel_order(self, order: GatewayInFlightOrder) -> CancelOrderResult:
 
         await order.get_exchange_order_id()
 
@@ -234,8 +241,82 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
         misc_updates = {
             "cancelation_transaction_hash": transaction_hash
         }
+        result = CancelOrderResult(
+            client_order_id=order.client_order_id,
+            trading_pair=order.trading_pair,
+            success=True,
+            misc_updates=misc_updates,
+        )
 
-        return True, misc_updates
+        return result
+
+    async def batch_order_update(
+        self, orders_to_create: List[GatewayInFlightOrder], orders_to_cancel: List[GatewayInFlightOrder]
+    ) -> BatchOrderUpdateResult:
+        await asyncio.gather(*[order.get_exchange_order_id() for order in orders_to_cancel])
+
+        spot_order_to_create = [
+            self._composer.SpotOrder(
+                market_id=self._trading_pair_to_active_spot_markets[order.trading_pair],
+                subaccount_id=self._sub_account_id,
+                fee_recipient=self._account_address,
+                price=float(order.price),
+                quantity=float(order.amount),
+                is_buy=order.trade_type == TradeType.BUY,
+                is_po=True,
+            ) for order in orders_to_create
+        ]
+
+        async with self._order_placement_lock:
+            order_hashes = self._order_hash_manager.compute_order_hashes(
+                spot_orders=spot_order_to_create, derivative_orders=[]
+            )
+            update_result = await self._get_gateway_instance().clob_batch_order_update(
+                connector=self._connector_name,
+                chain=self._chain,
+                network=self._network,
+                trading_pair=orders_to_create[0].trading_pair,
+                address=self._sub_account_id,
+                orders_to_create=orders_to_create,
+                orders_to_cancel=orders_to_cancel,
+            )
+
+        transaction_hash: Optional[str] = update_result.get("txHash")
+
+        if transaction_hash is None:
+            await self._update_account_address_and_create_order_hash_manager()
+            raise ValueError(f"The batch order update transaction failed.")
+
+        transaction_hash = f"0x{transaction_hash.lower()}"
+
+        update_result = BatchOrderUpdateResult(
+            place_order_results=tuple(
+                [
+                    PlaceOrderResult(
+                        client_order_id=order.client_order_id,
+                        exchange_order_id=order_hash,
+                        trading_pair=order.trading_pair,
+                        misc_updates={
+                            "creation_transaction_hash": transaction_hash,
+                        },
+                    ) for order, order_hash in zip(orders_to_create, order_hashes.spot)
+                ]
+            ),
+            cancel_order_results=tuple(
+                [
+                    CancelOrderResult(
+                        client_order_id=order.client_order_id,
+                        trading_pair=order.trading_pair,
+                        success=True,
+                        misc_updates={
+                            "cancelation_transaction_hash": transaction_hash
+                        }
+                    ) for order in orders_to_cancel
+                ]
+            )
+        )
+
+        return update_result
 
     async def get_trading_rules(self) -> Dict[str, TradingRule]:
         self._check_markets_initialized() or await self._update_markets()

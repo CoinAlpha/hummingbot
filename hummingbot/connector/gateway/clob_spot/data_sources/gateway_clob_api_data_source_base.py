@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
@@ -17,6 +18,29 @@ from hummingbot.core.event.event_listener import EventListener
 from hummingbot.core.event.events import AccountEvent, MarketEvent, OrderBookDataSourceEvent
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.pubsub import HummingbotLogger, PubSub
+
+
+@dataclass
+class PlaceOrderResult:
+    success: bool
+    client_order_id: str
+    exchange_order_id: Optional[str]
+    trading_pair: str
+    misc_updates: Dict[str, Any]
+
+
+@dataclass
+class CancelOrderResult:
+    success: bool
+    client_order_id: str
+    trading_pair: str
+    misc_updates: Dict[str, Any]
+
+
+@dataclass
+class BatchOrderUpdateResult:
+    place_order_results: Tuple[PlaceOrderResult]
+    cancel_order_results: Tuple[CancelOrderResult]
 
 
 class GatewayCLOBAPIDataSourceBase(ABC):
@@ -80,16 +104,29 @@ class GatewayCLOBAPIDataSourceBase(ABC):
     @abstractmethod
     async def place_order(
         self, order: GatewayInFlightOrder, **kwargs
-    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    ) -> PlaceOrderResult:
         """
-        :return: A tuple of the exchange order ID and any misc order updates.
+        :param order: The order to create.
+        :return: The result of the order creation attempt.
         """
         ...
 
     @abstractmethod
-    async def cancel_order(self, order: GatewayInFlightOrder) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    async def cancel_order(self, order: GatewayInFlightOrder) -> CancelOrderResult:
         """
-        :return: A tuple of the boolean indicating the cancelation success and any misc order updates.
+        :param order: The order to cancel.
+        :return: The result of the order cancelation attempt.
+        """
+        ...
+
+    @abstractmethod
+    async def batch_order_update(
+        self, orders_to_create: List[InFlightOrder], orders_to_cancel: List[InFlightOrder]
+    ) -> BatchOrderUpdateResult:
+        """
+        :param orders_to_create: The collection of orders to create.
+        :param orders_to_cancel: The collection of orders to cancel.
+        :return: The result of the batch order update attempt.
         """
         ...
 

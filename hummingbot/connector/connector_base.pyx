@@ -1,7 +1,7 @@
 import asyncio
 import time
 from decimal import Decimal
-from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from hummingbot.client.config.trade_fee_schema_loader import TradeFeeSchemaLoader
 from hummingbot.connector.in_flight_order_base import InFlightOrderBase
@@ -10,6 +10,7 @@ from hummingbot.connector.constants import s_decimal_NaN, s_decimal_0
 from hummingbot.core.clock cimport Clock
 from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import MarketEvent, OrderFilledEvent
 from hummingbot.core.network_iterator import NetworkIterator
@@ -98,7 +99,7 @@ cdef class ConnectorBase(NetworkIterator):
         """
         Estimate the trading fee for maker or taker type of order
         :param is_maker: Whether to get trading for maker or taker order
-        :returns An estimated fee in percentage value
+        :returns: An estimated fee in percentage value
         """
         return estimate_fee(self.name, is_maker).percent
 
@@ -138,7 +139,7 @@ cdef class ConnectorBase(NetworkIterator):
         For BUY filled order, the quote balance goes down while the base balance goes up, and for SELL order, it's the
         opposite. This does not account for fee.
         :param starting_timestamp: The starting timestamp to include filter order filled events
-        :returns A dictionary of tokens and their balance
+        :returns: A dictionary of tokens and their balance
         """
         order_filled_events = list(filter(lambda e: isinstance(e, OrderFilledEvent), self.event_logs))
         order_filled_events = [o for o in order_filled_events if o.timestamp > starting_timestamp]
@@ -229,12 +230,50 @@ cdef class ConnectorBase(NetworkIterator):
         NetworkIterator.c_stop(self, clock)
         self._trade_volume_metric_collector.stop()
 
+    def batch_order_update(
+        self, orders_to_create: Optional[List[Order]] = None, orders_to_cancel: Optional[List[Order]] = None
+    ) -> Tuple[Order]:
+        """
+        Issues a batch order update allowing the creation and cancelation of orders as a single API request for
+        exchanges that implement this feature. The default implementation of this method is to send the requests
+        one by one.
+        :param orders_to_create: An iterable of Order objects representing the orders to create.
+        :param orders_to_cancel: A iterable of Order objects representing the orders to cancel.
+        :returns: A tuple composed of the order creation objects, updated with the respective client order ID.
+        """
+        orders_to_create = orders_to_create or []
+        orders_to_cancel = orders_to_cancel or []
+
+        created_orders = tuple(orders_to_create)
+        for order in created_orders:
+            order.client_order_id = (
+                self.buy(
+                    trading_pair=order.trading_pair,
+                    amount=order.amount,
+                    order_type=order.order_type,
+                    price=order.price,
+                    **order.kwargs
+                ) if order.trade_type == TradeType.BUY
+                else self.sell(
+                    trading_pair=order.trading_pair,
+                    amount=order.amount,
+                    order_type=order.order_type,
+                    price=order.price,
+                    **order.kwargs
+                )
+            )
+
+        for order in orders_to_cancel:
+            self.cancel(order.trading_pair, order.client_order_id)
+
+        return created_orders
+
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
         """
         Cancels all in-flight orders and waits for cancellation results.
         Used by bot's top level stop and exit commands (cancelling outstanding orders on exit)
         :param timeout_seconds: The timeout at which the operation will be canceled.
-        :returns List of CancellationResult which indicates whether each order is successfully canceled.
+        :returns: List of CancellationResult which indicates whether each order is successfully canceled.
         """
         raise NotImplementedError
 
@@ -245,7 +284,7 @@ cdef class ConnectorBase(NetworkIterator):
         :param amount: The amount in base token value
         :param order_type: The order type
         :param price: The price (note: this is no longer optional)
-        :returns An order id
+        :returns: An order id
         """
         raise NotImplementedError
 
@@ -260,7 +299,7 @@ cdef class ConnectorBase(NetworkIterator):
         :param amount: The amount in base token value
         :param order_type: The order type
         :param price: The price (note: this is no longer optional)
-        :returns An order id
+        :returns: An order id
         """
         raise NotImplementedError
 
@@ -315,7 +354,7 @@ cdef class ConnectorBase(NetworkIterator):
         :param currency: The currency (token) name
         :param available_balance: The available balance of the token
         :param limit: The balance limit for the token
-        :returns An available balance after the limit has been applied
+        :returns: An available balance after the limit has been applied
         """
         in_flight_balance = self.in_flight_asset_balances(self.in_flight_orders).get(currency, s_decimal_0)
         limit -= in_flight_balance
@@ -330,7 +369,7 @@ cdef class ConnectorBase(NetworkIterator):
         :param currency: the token symbol
         :param available_balance: the current available_balance, this is also the snap balance taken since last
         _update_balances()
-        :returns the real available that accounts for changes in flight orders and filled orders
+        :returns: the real available that accounts for changes in flight orders and filled orders
         """
         snapshot_bal = self.in_flight_asset_balances(self._in_flight_orders_snapshot).get(currency, s_decimal_0)
         in_flight_bal = self.in_flight_asset_balances(self.in_flight_orders).get(currency, s_decimal_0)
@@ -367,7 +406,7 @@ cdef class ConnectorBase(NetworkIterator):
         :param trading_pair: The market trading pair
         :param is_buy: Whether to buy or sell the underlying asset
         :param amount: The amount (to buy or sell) (optional)
-        :returns The price
+        :returns: The price
         """
         raise NotImplementedError
 

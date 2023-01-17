@@ -3,7 +3,6 @@ import unittest
 from contextlib import ExitStack
 from decimal import Decimal
 from pathlib import Path
-from test.hummingbot.connector.gateway.clob_spot.data_sources.mock_utils import InjectiveClientMock
 from test.mock.http_recorder import HttpPlayer
 from typing import Awaitable, List
 from unittest.mock import patch
@@ -13,6 +12,9 @@ from bidict import bidict
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from hummingbot.connector.exchange_base import ExchangeBase
+from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import (
+    PlaceOrderResult, CancelOrderResult, BatchOrderUpdateResult
+)
 from hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_api_data_source import (
     InjectiveAPIDataSource,
 )
@@ -32,6 +34,7 @@ from hummingbot.core.data_type.trade_fee import (
 from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import AccountEvent, BalanceUpdateEvent, MarketEvent, OrderBookDataSourceEvent
 from hummingbot.core.network_iterator import NetworkStatus
+from test.hummingbot.connector.gateway.clob_spot.data_sources.mock_utils import InjectiveClientMock
 
 
 class MockExchange(ExchangeBase):
@@ -124,10 +127,10 @@ class InjectiveAPIDataSourceTest(unittest.TestCase):
             price=Decimal("10"),
             amount=Decimal("2"),
         )
-        exchange_order_id, misc_updates = self.async_run_with_timeout(coro=self.data_source.place_order(order=order))
+        result: PlaceOrderResult = self.async_run_with_timeout(coro=self.data_source.place_order(order=order))
 
-        self.assertEqual(expected_exchange_order_id, exchange_order_id)
-        self.assertEqual({"creation_transaction_hash": expected_transaction_hash}, misc_updates)
+        self.assertEqual(expected_exchange_order_id, result.exchange_order_id)
+        self.assertEqual({"creation_transaction_hash": expected_transaction_hash}, result.misc_updates)
 
     def test_cancel_order(self):
         creation_transaction_hash = "0x8f6g4552091a69125d5dfcb7b8c2659029395ceg"  # noqa: mock
@@ -145,7 +148,6 @@ class InjectiveAPIDataSourceTest(unittest.TestCase):
             exchange_order_id=expected_exchange_order_id,
             creation_transaction_hash=creation_transaction_hash,
         )
-        order.order_fills[creation_transaction_hash] = None  # to prevent requesting creation transaction
         self.injective_async_client_mock.configure_cancel_order_response(
             timestamp=self.initial_timestamp, transaction_hash=expected_transaction_hash
         )
@@ -155,12 +157,68 @@ class InjectiveAPIDataSourceTest(unittest.TestCase):
             order_hash=expected_exchange_order_id,
             is_canceled=True,
         )
-        cancelation_success, misc_updates = self.async_run_with_timeout(coro=self.data_source.cancel_order(order=order))
+        result: CancelOrderResult = self.async_run_with_timeout(coro=self.data_source.cancel_order(order=order))
 
-        self.assertTrue(cancelation_success)
-        self.assertEqual({"cancelation_transaction_hash": expected_transaction_hash}, misc_updates)
+        self.assertTrue(result.success)
+        self.assertEqual({"cancelation_transaction_hash": expected_transaction_hash}, result.misc_updates)
 
         self.injective_async_client_mock.run_until_all_items_delivered()
+
+    def test_batch_order_update(self):
+        expected_transaction_hash = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"  # noqa: mock
+        expected_exchange_order_id_for_create = (
+            "0x7df823e0adc0d4811e8d25d7380c1b45e43b16b0eea6f109cc1fb31d31aeddc8"  # noqa: mock
+        )
+        order_to_create = GatewayInFlightOrder(
+            client_order_id="someCOIDCancelCreate",
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            creation_timestamp=self.initial_timestamp,
+            price=Decimal("10"),
+            amount=Decimal("2"),
+            exchange_order_id=expected_exchange_order_id_for_create,
+        )
+        expected_exchange_order_id_for_cancel = (
+            "0x6df823e0adc0d4811e8d25d7380c1b45e43b16b0eea6f109cc1fb31d31aeddc7"  # noqa: mock
+        )
+        creation_transaction_hash_for_cancel = "0x8f6g4552091a69125d5dfcb7b8c2659029395ceg"  # noqa: mock
+        order_to_cancel = GatewayInFlightOrder(
+            client_order_id="someCOIDCancel",
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            price=Decimal("10"),
+            amount=Decimal("1"),
+            creation_timestamp=self.initial_timestamp,
+            exchange_order_id=expected_exchange_order_id_for_cancel,
+            creation_transaction_hash=creation_transaction_hash_for_cancel,
+        )
+        self.injective_async_client_mock.configure_batch_order_update_response(
+            timestamp=self.initial_timestamp,
+            transaction_hash=expected_transaction_hash,
+            created_order=order_to_create,
+            canceled_order=order_to_cancel,
+        )
+
+        result: BatchOrderUpdateResult = self.async_run_with_timeout(
+            coro=self.data_source.batch_order_update(
+                orders_to_create=[order_to_create], orders_to_cancel=[order_to_cancel]
+            )
+        )
+
+        self.assertEqual(1, len(result.place_order_results))
+        self.assertEqual(1, len(result.cancel_order_results))
+
+        place_result = result.place_order_results[0]
+
+        self.assertEqual(expected_exchange_order_id_for_create, place_result.exchange_order_id)
+        self.assertEqual({"creation_transaction_hash": expected_transaction_hash}, place_result.misc_updates)
+
+        cancel_result = result.cancel_order_results[0]
+
+        self.assertTrue(cancel_result.success)
+        self.assertEqual({"cancelation_transaction_hash": expected_transaction_hash}, cancel_result.misc_updates)
 
     def test_get_trading_rules(self):
         trading_rules = self.async_run_with_timeout(coro=self.data_source.get_trading_rules())
