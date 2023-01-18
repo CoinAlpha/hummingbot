@@ -2873,9 +2873,6 @@ definitions:
       - 'createOrderParams'
       - 'cancelOrderIds'
     properties:
-      market:
-        type: 'string'
-        example: 'AAVE-USDT'
       chain:
         type: 'string'
         example: 'injective'
@@ -2892,6 +2889,7 @@ definitions:
         type: 'array'
         items: 'object'
         example: [{
+            market: 'AAVE-USDT',
             price: '2',
             amount: '0.10',
             side: 'SELL',
@@ -2902,12 +2900,12 @@ definitions:
             amount: '0.10',
             side: 'SELL',
           }]
-      cancelOrderIds:
+      cancelOrderParams:
         type: 'array'
-        items: 'string'
+        items: 'object'
         example: [
-          '0x...',
-          '0x...', 
+          {market: 'AAVE-USDT', orderId: '0x...'},
+          {market: 'AAVE-USDT', orderId: '0x...'}, 
         ]
 
   ClobBatchOrdersResponse:

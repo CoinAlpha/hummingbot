@@ -3,16 +3,17 @@
     "network": "mainnet",
     "connector": "injective",
     "address": "$INJECTIVE_SUBACCOUNTID",
-    "market": "INJ-USDT",
     "createOrderParams": [{
         "price": "2",
         "amount": "0.10",
         "side": "SELL",
-        "orderType": "LIMIT"
+        "orderType": "LIMIT",
+        "market": "INJ-USDT"
     }, {
         "price": "3",
         "amount": "0.10",
         "side": "SELL",
-        "orderType": "LIMIT"
+        "orderType": "LIMIT",
+        "market": "INJ-USDT"
     }]
 }

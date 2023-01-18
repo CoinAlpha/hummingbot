@@ -18,6 +18,7 @@ import {
   ClobGetOrderResponse,
   ClobBatchUpdateRequest,
   CreateOrderParam,
+  ClobDeleteOrderRequestExtract,
 } from '../../clob/clob.requests';
 import { NetworkSelectionRequest } from '../../services/common-interfaces';
 import { InjectiveCLOBConfig } from './injective.clob.config';
@@ -60,9 +61,7 @@ export class InjectiveCLOB {
   public async loadMarkets() {
     const rawMarkets = await this.spotApi.fetchMarkets();
     for (const market of rawMarkets) {
-      this.parsedMarkets[
-        `${market.baseToken?.symbol}-${market.quoteToken?.symbol}`
-      ] = market;
+      this.parsedMarkets[market.ticker.replace('/', '-')] = market;
     }
   }
 
@@ -140,9 +139,8 @@ export class InjectiveCLOB {
     const wallet = await this._chain.getWallet(req.address);
     const privateKey: string = wallet.privateKey;
     const injectiveAddress: string = wallet.injectiveAddress;
-    const market = this.parsedMarkets[req.market];
     let spotOrdersToCreate: CreateOrderParam[] = [];
-    let spotOrdersToCancel: string[] = [];
+    let spotOrdersToCancel: ClobDeleteOrderRequestExtract[] = [];
     if ('createOrderParams' in req)
       spotOrdersToCreate = spotOrdersToCreate.concat(
         req.createOrderParams as CreateOrderParam[]
@@ -153,24 +151,24 @@ export class InjectiveCLOB {
         amount: req.amount,
         orderType: req.orderType,
         side: req.side,
+        market: req.market,
       });
-    if ('cancelOrderIds' in req)
+    if ('cancelOrderParams' in req)
       spotOrdersToCancel = spotOrdersToCancel.concat(
-        req.cancelOrderIds as string[]
+        req.cancelOrderParams as ClobDeleteOrderRequestExtract[]
       );
-    if ('orderId' in req) spotOrdersToCancel.push(req.orderId);
+    if ('orderId' in req)
+      spotOrdersToCancel.push({ orderId: req.orderId, market: req.market });
 
     const msg = MsgBatchUpdateOrders.fromJSON({
       subaccountId: req.address,
       injectiveAddress,
       spotOrdersToCreate: this.buildPostOrder(
         spotOrdersToCreate,
-        market,
         injectiveAddress
       ),
       spotOrdersToCancel: this.buildDeleteOrder(
         spotOrdersToCancel,
-        market,
         req.address
       ),
     });
@@ -184,7 +182,6 @@ export class InjectiveCLOB {
 
   public buildPostOrder(
     orderParams: CreateOrderParam[],
-    market: any,
     injectiveAddress: string
   ): {
     orderType: GrpcOrderType;
@@ -195,6 +192,7 @@ export class InjectiveCLOB {
   }[] {
     const spotOrdersToCreate = [];
     for (const order of orderParams) {
+      const market = this.parsedMarkets[order.market];
       let orderType: GrpcOrderType = order.side === 'BUY' ? 1 : 2;
       orderType =
         order.orderType === 'LIMIT_MAKER'
@@ -219,16 +217,15 @@ export class InjectiveCLOB {
   }
 
   public buildDeleteOrder(
-    orderIds: string[],
-    market: any,
+    orders: ClobDeleteOrderRequestExtract[],
     injectiveAddress: string
   ): { marketId: any; subaccountId: string; orderHash: string }[] {
     const spotOrdersToCancel = [];
-    for (const id of orderIds) {
+    for (const order of orders) {
       spotOrdersToCancel.push({
-        marketId: market.marketId,
+        marketId: this.parsedMarkets[order.market].marketId,
         subaccountId: injectiveAddress,
-        orderHash: id,
+        orderHash: order.orderId,
       });
     }
     return spotOrdersToCancel;
