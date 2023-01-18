@@ -250,7 +250,7 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
 
         spot_order_to_create = [
             self._composer.SpotOrder(
-                market_id=self._trading_pair_to_active_spot_markets[order.trading_pair],
+                market_id=self._trading_pair_to_active_spot_markets[order.trading_pair].market_id,
                 subaccount_id=self._sub_account_id,
                 fee_recipient=self._account_address,
                 price=float(order.price),

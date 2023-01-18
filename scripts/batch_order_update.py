@@ -7,10 +7,10 @@ from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.order import Order
 from hummingbot.strategy.script_strategy_base import ScriptStrategyBase
 
-CONNECTOR = "okx"
-TRADING_PAIR = combine_to_hb_trading_pair(base="BTC", quote="USDT")
-AMOUNT = Decimal("0.0001")
-ORDERS_INTERVAL = 10
+CONNECTOR = "injective_injective_mainnet"
+TRADING_PAIR = combine_to_hb_trading_pair(base="ATOM", quote="USDT")
+AMOUNT = Decimal("0.15")
+ORDERS_INTERVAL = 20
 PRICE_OFFSET_RATIO = Decimal("0.1")  # 10%
 
 
