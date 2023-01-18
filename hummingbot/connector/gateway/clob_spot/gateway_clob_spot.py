@@ -16,10 +16,11 @@ from hummingbot.connector.gateway.clob_spot.gateway_clob_api_order_book_data_sou
 from hummingbot.connector.gateway.gateway_in_flight_order import GatewayInFlightOrder
 from hummingbot.connector.gateway.gateway_order_tracker import GatewayOrderTracker
 from hummingbot.connector.trading_rule import TradingRule
-from hummingbot.connector.utils import combine_to_hb_trading_pair
+from hummingbot.connector.utils import combine_to_hb_trading_pair, get_new_client_order_id
 from hummingbot.core.api_throttler.data_types import RateLimit
 from hummingbot.core.data_type.common import OrderType
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.trade_fee import (
     AddedToCostTradeFee,
@@ -29,6 +30,7 @@ from hummingbot.core.data_type.trade_fee import (
 )
 from hummingbot.core.event.events import AccountEvent, BalanceUpdateEvent, MarketEvent
 from hummingbot.core.network_iterator import NetworkStatus
+from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.core.utils.estimate_fee import build_trade_fee
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
@@ -159,6 +161,86 @@ class GatewayCLOBSPOT(ExchangePyBase):
         if current_tick > last_tick:
             self._poll_notifier.set()
         self._last_timestamp = timestamp
+
+    def batch_order_update(
+        self, orders_to_create: Optional[List[Order]] = None, orders_to_cancel: Optional[List[Order]] = None
+    ) -> Tuple[Order]:
+        orders_to_create = orders_to_create or []
+        orders_to_cancel = orders_to_cancel or []
+
+        for order in orders_to_create:
+            order.client_order_id = get_new_client_order_id(
+                is_buy=order.trade_type == TradeType.BUY,
+                trading_pair=order.trading_pair,
+                hbot_order_id_prefix=self.client_order_id_prefix,
+                max_id_len=self.client_order_id_max_length
+            )
+
+        safe_ensure_future(
+            coro=self._perform_batch_order_update(orders_to_create=orders_to_create, orders_to_cancel=orders_to_cancel)
+        )
+
+        return tuple(orders_to_create)
+
+    async def _perform_batch_order_update(
+        self, orders_to_create: Optional[List[Order]] = None, orders_to_cancel: Optional[List[Order]] = None
+    ):
+        in_flight_orders_to_create = [
+            validated_order for validated_order in [
+                await self._start_tracking_and_validate_order(
+                    trade_type=order.trade_type,
+                    order_id=order.client_order_id,
+                    trading_pair=order.trading_pair,
+                    amount=order.amount,
+                    order_type=order.order_type,
+                    price=order.price,
+                ) for order in orders_to_create
+            ] if validated_order is not None
+        ]
+        in_flight_orders_to_cancel = [
+            tracked_order for tracked_order in [
+                self._order_tracker.fetch_tracked_order(order.client_order_id)
+                for order in orders_to_cancel
+            ] if tracked_order is not None
+        ]
+
+        try:
+            batch_update_result = await self._api_data_source.batch_order_update(
+                orders_to_create=in_flight_orders_to_create,
+                orders_to_cancel=in_flight_orders_to_cancel,
+            )
+            for place_order_result, in_flight_order in (
+                zip(batch_update_result.place_order_results, in_flight_orders_to_create)
+            ):
+                if place_order_result.success:
+                    self._update_order_after_creation_success(
+                        place_order_result.exchange_order_id,
+                        order=in_flight_order,
+                        update_timestamp=self.current_timestamp,
+                    )
+                else:
+                    self._update_order_after_creation_failure(
+                        order_id=place_order_result.client_order_id, trading_pair=place_order_result.trading_pair
+                    )
+            for cancel_order_result, in_flight_order in (
+                zip(batch_update_result.cancel_order_results, in_flight_orders_to_cancel)
+            ):
+                if cancel_order_result.success:
+                    self._update_order_after_cancelation_success(order=in_flight_order)
+        except asyncio.CancelledError:
+            raise
+        except Exception as ex:
+            self.logger().network("Batch order update failed.")
+            for order in orders_to_create:
+                self._on_order_creation_failure(
+                    order_id=order.client_order_id,
+                    trading_pair=order.trading_pair,
+                    amount=order.amount,
+                    trade_type=order.trade_type,
+                    order_type=order.order_type,
+                    price=order.price,
+                    exception=ex,
+                )
 
     def supported_order_types(self) -> List[OrderType]:
         return [OrderType.LIMIT, OrderType.LIMIT_MAKER]
@@ -299,49 +381,15 @@ class GatewayCLOBSPOT(ExchangePyBase):
         price: Decimal,
         **kwargs,
     ) -> Tuple[str, float]:
-        """Not used."""
-        raise NotImplementedError
-
-    async def _place_order_and_process_update(self, order: GatewayInFlightOrder, **kwargs) -> str:
-        exchange_order_id, misc_order_updates = await self._api_data_source.place_order(order=order, **kwargs)
-        order_update: OrderUpdate = OrderUpdate(
-            client_order_id=order.client_order_id,
-            exchange_order_id=exchange_order_id,
-            trading_pair=order.trading_pair,
-            update_timestamp=self.current_timestamp,
-            new_state=OrderState.PENDING_CREATE,
-            misc_updates=misc_order_updates,
-        )
-        self._order_tracker.process_order_update(order_update)
-
-        return exchange_order_id
+        order = self._order_tracker.fetch_tracked_order(client_order_id=order_id)
+        place_order_result = await self._api_data_source.place_order(order=order, **kwargs)
+        return place_order_result.exchange_order_id, self.current_timestamp
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
-        """Not used."""
-        raise NotImplementedError
-
-    async def _execute_order_cancel_and_process_update(self, order: GatewayInFlightOrder) -> bool:
-        cancelled, misc_order_updates = await self._api_data_source.cancel_order(order=order)
-
-        if cancelled:
-            order_update: OrderUpdate = OrderUpdate(
-                client_order_id=order.client_order_id,
-                trading_pair=order.trading_pair,
-                update_timestamp=self.current_timestamp,
-                new_state=(OrderState.CANCELED
-                           if self.is_cancel_request_in_exchange_synchronous
-                           else OrderState.PENDING_CANCEL),
-                misc_updates=misc_order_updates,
-            )
-            self._order_tracker.process_order_update(order_update)
-
-        return cancelled
+        cancel_order_result = await self._api_data_source.cancel_order(order=tracked_order)
+        return cancel_order_result
 
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception) -> bool:
-        """Not used."""
-        return False
-
-    def _is_request_result_an_error_related_to_time_synchronizer(self, request_result: Dict[str, Any]) -> bool:
         """Not used."""
         return False
 

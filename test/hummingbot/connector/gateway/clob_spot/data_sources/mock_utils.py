@@ -142,7 +142,7 @@ class InjectiveClientMock:
 
     @property
     def maker_fee_rate(self) -> Decimal:
-        return Decimal("0.0001")
+        return Decimal("-0.0001")
 
     @property
     def taker_fee_rate(self) -> Decimal:
@@ -199,6 +199,39 @@ class InjectiveClientMock:
     def run_until_cancel_order_called(self, timeout: float = 1):
         asyncio.get_event_loop().run_until_complete(
             asyncio.wait_for(fut=self.cancel_order_called_event.wait(), timeout=timeout)
+        )
+
+    def configure_batch_order_update_response(
+        self,
+        timestamp: int,
+        transaction_hash: str,
+        created_order: InFlightOrder,
+        canceled_order: InFlightOrder,
+    ):
+        def update_and_return(*_, **__):
+            self.place_order_called_event.set()
+            return {
+                "network": "injective",
+                "timestamp": timestamp,
+                "latency": 2,
+                "txHash": transaction_hash if not transaction_hash.startswith("0x") else transaction_hash[2:],
+            }
+
+        self.gateway_instance_mock.clob_batch_order_update.side_effect = update_and_return
+        self.configure_get_tx_by_hash_creation_response(
+            timestamp=timestamp, success=True, order_hash=created_order.exchange_order_id
+        )
+        self.configure_get_historical_spot_orders_response_for_in_flight_order(
+            timestamp=timestamp,
+            in_flight_order=created_order,
+        )
+        self.configure_get_historical_spot_orders_response_for_in_flight_order(
+            timestamp=timestamp,
+            in_flight_order=canceled_order,
+            is_canceled=True,
+        )
+        self.injective_compute_order_hashes_mock.return_value = OrderHashResponse(
+            spot=[created_order.exchange_order_id], derivative=[]
         )
 
     def configure_place_order_response(
@@ -1018,7 +1051,7 @@ class InjectiveClientMock:
             base_token_meta=base_token_meta,
             quote_denom=self.quote_denom,
             quote_token_meta=quote_token_meta,
-            maker_fee_rate=str(-self.maker_fee_rate),
+            maker_fee_rate=str(self.maker_fee_rate),
             taker_fee_rate=str(self.taker_fee_rate),
             service_provider_fee="0.4",
             min_price_tick_size=min_price_tick_size,
@@ -1036,7 +1069,7 @@ class InjectiveClientMock:
             base_token_meta=inj_token_meta,
             quote_denom=self.quote_denom,
             quote_token_meta=quote_token_meta,
-            maker_fee_rate=str(-self.maker_fee_rate),
+            maker_fee_rate=str(self.maker_fee_rate),
             taker_fee_rate=str(self.taker_fee_rate),
             service_provider_fee="0.4",
             min_price_tick_size=inj_pair_min_price_tick_size,

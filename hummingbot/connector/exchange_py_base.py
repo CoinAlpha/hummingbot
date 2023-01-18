@@ -78,9 +78,7 @@ class ExchangePyBase(ExchangeBase, ABC):
             domain=self.domain))
 
         # init UserStream Data Source and Tracker
-        self._userstream_ds = self._create_user_stream_data_source()
-        self._user_stream_tracker = UserStreamTracker(
-            data_source=self._userstream_ds)
+        self._user_stream_tracker = self._create_user_stream_tracker()
 
         self._order_tracker: ClientOrderTracker = self._create_order_tracker()
 
@@ -277,7 +275,10 @@ class ExchangePyBase(ExchangeBase, ABC):
         Includes the logic that has to be processed every time a new tick happens in the bot. Particularly it enables
         the execution of the status update polling loop using an event.
         """
-        last_recv_diff = timestamp - self._user_stream_tracker.last_recv_time
+        last_user_stream_message_time = (
+            0 if self._user_stream_tracker is None else self._user_stream_tracker.last_recv_time
+        )
+        last_recv_diff = timestamp - last_user_stream_message_time
         poll_interval = (self.SHORT_POLL_INTERVAL
                          if last_recv_diff > self.TICK_INTERVAL_LIMIT
                          else self.LONG_POLL_INTERVAL)
@@ -438,7 +439,59 @@ class ExchangePyBase(ExchangeBase, ABC):
         :param order_type: the type of order to create (MARKET, LIMIT, LIMIT_MAKER)
         :param price: the order price
         """
-        exchange_order_id = ""
+        order = await self._start_tracking_and_validate_order(
+            trade_type=trade_type,
+            order_id=order_id,
+            trading_pair=trading_pair,
+            amount=amount,
+            order_type=order_type,
+            price=price,
+            **kwargs
+        )
+
+        ret = None
+        if order is not None:
+            exchange_order_id = None
+            try:
+                exchange_order_id, update_timestamp = await self._place_order(
+                    order_id=order.client_order_id,
+                    trading_pair=order.trading_pair,
+                    amount=order.amount,
+                    trade_type=order.trade_type,
+                    order_type=order.order_type,
+                    price=order.price,
+                    **kwargs,
+                )
+                self._update_order_after_creation_success(
+                    exchange_order_id=exchange_order_id, order=order, update_timestamp=update_timestamp
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as ex:
+                self._on_order_creation_failure(
+                    order_id=order.client_order_id,
+                    trading_pair=order.trading_pair,
+                    amount=order.amount,
+                    trade_type=order.trade_type,
+                    order_type=order.order_type,
+                    price=order.price,
+                    exception=ex,
+                    **kwargs,
+                )
+            ret = order_id, exchange_order_id
+
+        return ret
+
+    async def _start_tracking_and_validate_order(
+        self,
+        trade_type: TradeType,
+        order_id: str,
+        trading_pair: str,
+        amount: Decimal,
+        order_type: OrderType,
+        price: Optional[Decimal] = None,
+        **kwargs
+    ) -> Optional[InFlightOrder]:
         trading_rule = self._trading_rules[trading_pair]
 
         if order_type in [OrderType.LIMIT, OrderType.LIMIT_MAKER]:
@@ -462,50 +515,25 @@ class ExchangePyBase(ExchangeBase, ABC):
 
         if order_type not in self.supported_order_types():
             self.logger().error(f"{order_type} is not in the list of supported order types")
-            self._update_order_after_failure(order_id=order_id, trading_pair=trading_pair)
-            return
-
-        if amount < trading_rule.min_order_size:
+            self._update_order_after_creation_failure(order_id=order_id, trading_pair=trading_pair)
+            order = None
+        elif amount < trading_rule.min_order_size:
             self.logger().warning(f"{trade_type.name.title()} order amount {amount} is lower than the minimum order"
                                   f" size {trading_rule.min_order_size}. The order will not be created.")
-            self._update_order_after_failure(order_id=order_id, trading_pair=trading_pair)
-            return
-        if price is not None and amount * price < trading_rule.min_notional_size:
+            self._update_order_after_creation_failure(order_id=order_id, trading_pair=trading_pair)
+            order = None
+        elif price is not None and amount * price < trading_rule.min_notional_size:
             self.logger().warning(f"{trade_type.name.title()} order notional {amount * price} is lower than the "
                                   f"minimum notional size {trading_rule.min_notional_size}. "
                                   "The order will not be created.")
-            self._update_order_after_failure(order_id=order_id, trading_pair=trading_pair)
-            return
+            self._update_order_after_creation_failure(order_id=order_id, trading_pair=trading_pair)
+            order = None
 
-        try:
-            exchange_order_id = await self._place_order_and_process_update(order=order, **kwargs,)
+        return order
 
-        except asyncio.CancelledError:
-            raise
-        except Exception as ex:
-            self._on_order_failure(
-                order_id=order_id,
-                trading_pair=trading_pair,
-                amount=amount,
-                trade_type=trade_type,
-                order_type=order_type,
-                price=price,
-                exception=ex,
-                **kwargs,
-            )
-        return order_id, exchange_order_id
-
-    async def _place_order_and_process_update(self, order: InFlightOrder, **kwargs) -> str:
-        exchange_order_id, update_timestamp = await self._place_order(
-            order_id=order.client_order_id,
-            trading_pair=order.trading_pair,
-            amount=order.amount,
-            trade_type=order.trade_type,
-            order_type=order.order_type,
-            price=order.price,
-            **kwargs,
-        )
-
+    def _update_order_after_creation_success(
+        self, exchange_order_id: str, order: InFlightOrder, update_timestamp: float
+    ):
         order_update: OrderUpdate = OrderUpdate(
             client_order_id=order.client_order_id,
             exchange_order_id=str(exchange_order_id),
@@ -515,9 +543,7 @@ class ExchangePyBase(ExchangeBase, ABC):
         )
         self._order_tracker.process_order_update(order_update)
 
-        return exchange_order_id
-
-    def _on_order_failure(
+    def _on_order_creation_failure(
         self,
         order_id: str,
         trading_pair: str,
@@ -534,9 +560,9 @@ class ExchangePyBase(ExchangeBase, ABC):
             exc_info=True,
             app_warning_msg=f"Failed to submit buy order to {self.name_cap}. Check API key and network connection."
         )
-        self._update_order_after_failure(order_id=order_id, trading_pair=trading_pair)
+        self._update_order_after_creation_failure(order_id=order_id, trading_pair=trading_pair)
 
-    def _update_order_after_failure(self, order_id: str, trading_pair: str):
+    def _update_order_after_creation_failure(self, order_id: str, trading_pair: str):
         order_update: OrderUpdate = OrderUpdate(
             client_order_id=order_id,
             trading_pair=trading_pair,
@@ -547,7 +573,9 @@ class ExchangePyBase(ExchangeBase, ABC):
 
     async def _execute_order_cancel(self, order: InFlightOrder) -> str:
         try:
-            cancelled = await self._execute_order_cancel_and_process_update(order=order)
+            cancelled = await self._place_cancel(order.client_order_id, order)
+            if cancelled:
+                self._update_order_after_cancelation_success(order=order)
             if cancelled:
                 return order.client_order_id
         except asyncio.CancelledError:
@@ -562,19 +590,16 @@ class ExchangePyBase(ExchangeBase, ABC):
             self.logger().error(
                 f"Failed to cancel order {order.client_order_id}", exc_info=True)
 
-    async def _execute_order_cancel_and_process_update(self, order: InFlightOrder) -> bool:
-        cancelled = await self._place_cancel(order.client_order_id, order)
-        if cancelled:
-            order_update: OrderUpdate = OrderUpdate(
-                client_order_id=order.client_order_id,
-                trading_pair=order.trading_pair,
-                update_timestamp=self.current_timestamp,
-                new_state=(OrderState.CANCELED
-                           if self.is_cancel_request_in_exchange_synchronous
-                           else OrderState.PENDING_CANCEL),
-            )
-            self._order_tracker.process_order_update(order_update)
-        return cancelled
+    def _update_order_after_cancelation_success(self, order: InFlightOrder):
+        order_update: OrderUpdate = OrderUpdate(
+            client_order_id=order.client_order_id,
+            trading_pair=order.trading_pair,
+            update_timestamp=self.current_timestamp,
+            new_state=(OrderState.CANCELED
+                       if self.is_cancel_request_in_exchange_synchronous
+                       else OrderState.PENDING_CANCEL),
+        )
+        self._order_tracker.process_order_update(order_update)
 
     async def _execute_cancel(self, trading_pair: str, order_id: str) -> str:
         """
@@ -694,7 +719,7 @@ class ExchangePyBase(ExchangeBase, ABC):
         self._trading_fees_polling_task = safe_ensure_future(self._trading_fees_polling_loop())
         if self.is_trading_required:
             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
-            self._user_stream_tracker_task = safe_ensure_future(self._user_stream_tracker.start())
+            self._user_stream_tracker_task = self._create_user_stream_tracker_task()
             self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
             self._lost_orders_update_task = safe_ensure_future(self._lost_orders_update_polling_loop())
 
@@ -861,6 +886,15 @@ class ExchangePyBase(ExchangeBase, ABC):
             except Exception:
                 self.logger().exception("Error while reading user events queue. Retrying in 1s.")
                 await self._sleep(1.0)
+
+    def _is_user_stream_initialized(self):
+        return self._user_stream_tracker.data_source.last_recv_time > 0 or not self.is_trading_required
+
+    def _create_user_stream_tracker(self):
+        return UserStreamTracker(data_source=self._create_user_stream_data_source())
+
+    def _create_user_stream_tracker_task(self):
+        return safe_ensure_future(self._user_stream_tracker.start())
 
     # === Exchange / Trading logic methods that call the API ===
 
@@ -1075,6 +1109,3 @@ class ExchangePyBase(ExchangeBase, ABC):
     async def _make_trading_pairs_request(self) -> Any:
         exchange_info = await self._api_get(path_url=self.trading_pairs_request_path)
         return exchange_info
-
-    def _is_user_stream_initialized(self):
-        return (self._user_stream_tracker.data_source.last_recv_time > 0 or not self.is_trading_required)
