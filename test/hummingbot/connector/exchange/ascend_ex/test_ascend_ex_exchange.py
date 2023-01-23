@@ -353,8 +353,8 @@ class AscendExExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTest
         self.assertEqual(self.exchange_symbol_for_tokens(self.base_asset, self.quote_asset), request_data["symbol"])
         self.assertEqual(order.trade_type.name.lower(), request_data["side"])
         self.assertEqual(OrderType.LIMIT.name.lower(), request_data["orderType"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["orderQty"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["orderPrice"]))
+        self.assertEqual(order.amount, Decimal(request_data["orderQty"]))
+        self.assertEqual(order.price, Decimal(request_data["orderPrice"]))
         self.assertEqual(order.client_order_id, request_data["id"])
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):

@@ -301,8 +301,8 @@ class BtcMarketsExchangeTest(AbstractExchangeConnectorTests.ExchangeConnectorTes
                          request_data["marketId"])
         self.assertEqual("Limit", request_data["type"])
         self.assertIn(request_data["side"], ["Ask", "Bid"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["amount"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["price"]))
+        self.assertEqual(order.amount, Decimal(request_data["amount"]))
+        self.assertEqual(order.price, Decimal(request_data["price"]))
         self.assertEqual(order.client_order_id, request_data["clientOrderId"])
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):

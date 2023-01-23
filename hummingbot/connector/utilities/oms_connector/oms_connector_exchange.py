@@ -29,6 +29,7 @@ from hummingbot.connector.utils import combine_to_hb_trading_pair, get_new_numer
 from hummingbot.core.api_throttler.data_types import RateLimit
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.trade_fee import TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
@@ -143,13 +144,16 @@ class OMSExchange(ExchangePyBase):
                 nonce_creator=self._nonce_creator, max_id_bit_count=CONSTANTS.MAX_ID_BIT_COUNT
             )
         )
-        safe_ensure_future(self._create_order(
-            trade_type=TradeType.BUY,
-            order_id=order_id,
+        order = Order(
             trading_pair=trading_pair,
-            amount=amount,
             order_type=order_type,
-            price=price))
+            trade_type=TradeType.BUY,
+            amount=amount,
+            price=price,
+            client_order_id=order_id,
+            kwargs=kwargs,
+        )
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=[order]))
         return order_id
 
     def sell(self,
@@ -171,14 +175,26 @@ class OMSExchange(ExchangePyBase):
                 nonce_creator=self._nonce_creator, max_id_bit_count=CONSTANTS.MAX_ID_BIT_COUNT
             )
         )
-        safe_ensure_future(self._create_order(
-            trade_type=TradeType.SELL,
-            order_id=order_id,
+        order = Order(
             trading_pair=trading_pair,
-            amount=amount,
             order_type=order_type,
-            price=price))
+            trade_type=TradeType.SELL,
+            amount=amount,
+            price=price,
+            client_order_id=order_id,
+            kwargs=kwargs,
+        )
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=[order]))
         return order_id
+
+    def batch_order_create(self, orders_to_create: List[Order]) -> Tuple[Order]:
+        creation_result = tuple(orders_to_create)
+        for order in creation_result:
+            order.client_order_id = get_new_numeric_client_order_id(
+                nonce_creator=self._nonce_creator, max_id_bit_count=CONSTANTS.MAX_ID_BIT_COUNT
+            )
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=orders_to_create))
+        return creation_result
 
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception):
         # Not required for OMS connectors
@@ -254,6 +270,7 @@ class OMSExchange(ExchangePyBase):
         trade_type: TradeType,
         order_type: OrderType,
         price: Decimal,
+        **kwargs
     ) -> Tuple[str, float]:
         instrument_id = await self.exchange_symbol_associated_to_pair(trading_pair)
         data = {
@@ -501,6 +518,7 @@ class OMSExchange(ExchangePyBase):
         is_auth_required: bool = False,
         return_err: bool = False,
         limit_id: Optional[str] = None,
+        **kwargs
     ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
         rest_assistant = await self._web_assistants_factory.get_rest_assistant()
         url = self._url_creator.get_rest_url(path_url)

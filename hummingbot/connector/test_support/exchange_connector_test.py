@@ -11,6 +11,7 @@ from aioresponses import aioresponses
 from aioresponses.core import RequestCall
 from bidict import bidict
 
+from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, TradeType
@@ -192,7 +193,7 @@ class AbstractExchangeConnectorTests:
             raise NotImplementedError
 
         @abstractmethod
-        def create_exchange_instance(self):
+        def create_exchange_instance(self) -> ExchangePyBase:
             raise NotImplementedError
 
         @abstractmethod
@@ -350,6 +351,189 @@ class AbstractExchangeConnectorTests:
         @abstractmethod
         def trade_event_for_full_fill_websocket_update(self, order: InFlightOrder):
             raise NotImplementedError
+
+        def configure_batch_order_created_event_for_two_orders(self, mock_api: aioresponses):
+            """Overwrite this method for exchanges that implement batch order placing."""
+            url = self.order_creation_url
+            creation_response = self.order_creation_request_successful_mock_response
+            batch_order_create_0 = asyncio.Event()
+            batch_order_create_1 = asyncio.Event()
+            self.test_events_dict["batch_order_create_0"] = batch_order_create_0
+            self.test_events_dict["batch_order_create_1"] = batch_order_create_1
+
+            def callback():
+                if not batch_order_create_0.is_set():
+                    batch_order_create_0.set()
+                elif not batch_order_create_1.is_set():
+                    batch_order_create_1.set()
+                else:
+                    raise RuntimeError("Made one too many order creation calls!")
+
+            mock_api.post(url,
+                          body=json.dumps(creation_response),
+                          callback=lambda *args, **kwargs: callback(),
+                          repeat=True)
+
+        def configure_batch_order_create_event_for_two_orders_one_order_rejected_by_exchange(
+            self, mock_api: aioresponses
+        ):
+            """Overwrite this method for exchanges that implement batch order placing."""
+            url = self.order_creation_url
+            creation_success_response = self.order_creation_request_successful_mock_response
+            batch_order_create_0 = asyncio.Event()
+            batch_order_create_1 = asyncio.Event()
+            self.test_events_dict["batch_order_create_0"] = batch_order_create_0
+            self.test_events_dict["batch_order_create_1"] = batch_order_create_1
+
+            def callback():
+                if not batch_order_create_0.is_set():
+                    batch_order_create_0.set()
+                    mock_api.post(url,
+                                  status=400,
+                                  callback=lambda *args, **kwargs: callback())
+                elif not batch_order_create_1.is_set():
+                    batch_order_create_1.set()
+                else:
+                    raise RuntimeError("Made one too many order creation calls!")
+
+            mock_api.post(url,
+                          body=json.dumps(creation_success_response),
+                          callback=lambda *args, **kwargs: callback())
+
+        def await_batch_order_create_event(self):
+            """Overwrite this method for exchanges that implement batch order placing."""
+            self.async_run_with_timeout(self.test_events_dict["batch_order_create_0"].wait())
+            self.async_run_with_timeout(self.test_events_dict["batch_order_create_1"].wait())
+
+        def validate_batch_order_create_requests(
+            self, mock_api: aioresponses, new_order_0: InFlightOrder, new_order_1: InFlightOrder
+        ):
+            """Overwrite this method for exchanges that implement batch order placing."""
+            url = self.order_creation_url
+            create_request_0 = self._all_executed_requests(mock_api, url)[0]
+            create_request_1 = self._all_executed_requests(mock_api, url)[1]
+            self.validate_auth_credentials_present(create_request_0)
+            self.validate_auth_credentials_present(create_request_1)
+            self.validate_order_creation_request(order=new_order_0, request_call=create_request_0)
+            self.validate_order_creation_request(order=new_order_1, request_call=create_request_1)
+
+        def validate_logs_batch_order_create_two_orders(self, new_order_0: InFlightOrder, new_order_1: InFlightOrder):
+            self.assertTrue(
+                self.is_logged(
+                    "INFO",
+                    f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_0.client_order_id} for "
+                    f"{new_order_0.amount} {self.trading_pair}."
+                )
+            )
+            self.assertTrue(
+                self.is_logged(
+                    "INFO",
+                    f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_1.client_order_id} for "
+                    f"{new_order_1.amount} {self.trading_pair}."
+                )
+            )
+
+        def validate_logs_batch_order_create_two_orders_one_order_rejected_by_exchange(
+            self,
+            new_order_0: InFlightOrder,
+            rejected_order_trade_type: TradeType,
+            rejected_order_order_type: OrderType,
+            rejected_order_amount: Decimal,
+            rejected_order_price: Decimal,
+        ):
+            self.assertTrue(
+                self.is_logged(
+                    "NETWORK",
+                    f"Error submitting {rejected_order_trade_type.name.lower()} {rejected_order_order_type.name}"
+                    f" order to {self.exchange.name_cap} for {rejected_order_amount} {self.trading_pair}"
+                    f" {rejected_order_price}."
+                )
+            )
+            self.assertTrue(
+                self.is_logged(
+                    "INFO",
+                    f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_0.client_order_id} for "
+                    f"{new_order_0.amount} {self.trading_pair}."
+                )
+            )
+            
+        def configure_batch_order_cancel_event_for_two_orders(
+            self, mock_api: aioresponses, order_to_cancel_0: InFlightOrder, order_to_cancel_1: InFlightOrder
+        ):
+            """Overwrite this method for exchanges that implement batch order cancelation."""
+            batch_order_cancel_0 = asyncio.Event()
+            batch_order_cancel_1 = asyncio.Event()
+            self.test_events_dict["batch_order_cancel_0"] = batch_order_cancel_0
+            self.test_events_dict["batch_order_cancel_1"] = batch_order_cancel_1
+
+            def callback():
+                if not batch_order_cancel_0.is_set():
+                    batch_order_cancel_0.set()
+                elif not batch_order_cancel_1.is_set():
+                    batch_order_cancel_1.set()
+                else:
+                    raise RuntimeError("Made one too many order cancelation calls!")
+                
+            self.test_urls_dict["batch_order_cancel_0"] = self.configure_successful_cancelation_response(
+                order=order_to_cancel_0,
+                mock_api=mock_api,
+                callback=lambda *args, **kwargs: callback())
+            self.test_urls_dict["batch_order_cancel_1"] = self.configure_successful_cancelation_response(
+                order=order_to_cancel_1,
+                mock_api=mock_api,
+                callback=lambda *args, **kwargs: callback())
+
+        def configure_batch_order_cancel_event_for_two_orders_one_cancelation_fails(
+            self, mock_api: aioresponses, order_to_cancel_0: InFlightOrder, order_to_cancel_1: InFlightOrder
+        ):
+            batch_order_cancel_0 = asyncio.Event()
+            batch_order_cancel_1 = asyncio.Event()
+            self.test_events_dict["batch_order_cancel_0"] = batch_order_cancel_0
+            self.test_events_dict["batch_order_cancel_1"] = batch_order_cancel_1
+
+            def callback():
+                if not batch_order_cancel_0.is_set():
+                    batch_order_cancel_0.set()
+                    self.configure_erroneous_cancelation_response(
+                        order=order_to_cancel_1,
+                        mock_api=mock_api,
+                        callback=lambda *args, **kwargs: callback()
+                    )
+                elif not batch_order_cancel_1.is_set():
+                    batch_order_cancel_1.set()
+                else:
+                    raise RuntimeError("Made one too many order cancelation calls!")
+
+            self.configure_successful_cancelation_response(
+                order=order_to_cancel_0,
+                mock_api=mock_api,
+                callback=lambda *args, **kwargs: callback())
+
+        def await_batch_order_cancel_event(self):
+            """Overwrite this method for exchanges that implement batch order cancelation."""
+            self.async_run_with_timeout(self.test_events_dict["batch_order_cancel_0"].wait())
+            self.async_run_with_timeout(self.test_events_dict["batch_order_cancel_1"].wait())
+
+        def validate_batch_order_cancel_requests(
+            self, mock_api: aioresponses, order_to_cancel_0: InFlightOrder, order_to_cancel_1: InFlightOrder
+        ):
+            """Overwrite this method for exchanges that implement batch order cancelation."""
+            url_0 = self.test_urls_dict["batch_order_cancel_0"]
+            url_1 = self.test_urls_dict["batch_order_cancel_1"]
+            
+            cancel_request_0 = self._all_executed_requests(mock_api, url_0)[0]
+            cancel_request_1 = self._all_executed_requests(mock_api, url_1)[0]
+            if cancel_request_1 == cancel_request_0:  # urls are the same
+                cancel_request_1 = self._all_executed_requests(mock_api, url_1)[1]
+                
+            self.validate_auth_credentials_present(cancel_request_0)
+            self.validate_auth_credentials_present(cancel_request_1)
+            self.validate_order_cancelation_request(
+                order=order_to_cancel_0,
+                request_call=cancel_request_0)
+            self.validate_order_cancelation_request(
+                order=order_to_cancel_1,
+                request_call=cancel_request_1)
 
         @classmethod
         def setUpClass(cls) -> None:
@@ -640,6 +824,217 @@ class AbstractExchangeConnectorTests:
             )
 
         @aioresponses()
+        def test_batch_order_create_two_orders_success(self, mock_api):
+            self._simulate_trading_rules_initialized()
+            self.exchange._set_current_timestamp(1640780000)
+
+            self.configure_batch_order_created_event_for_two_orders(mock_api=mock_api)
+
+            order_0_amount = Decimal("1")
+            order_0_price = Decimal("10")
+            order_0 = self.create_new_buy_order(amount=order_0_amount, price=order_0_price)
+            order_1_amount = Decimal("2")
+            order_1_price = Decimal("20")
+            order_1 = self.create_new_buy_order(amount=order_1_amount, price=order_1_price)
+
+            orders: Tuple[Order] = self.exchange.batch_order_create(orders_to_create=[order_0, order_1])
+
+            self.assertEqual(2, len(orders))
+
+            self.await_batch_order_create_event()
+
+            new_order_id_0 = orders[0].client_order_id
+            new_order_id_1 = orders[1].client_order_id
+            new_order_0 = self.exchange.in_flight_orders[new_order_id_0]
+            new_order_1 = self.exchange.in_flight_orders[new_order_id_1]
+            self.validate_batch_order_create_requests(
+                mock_api=mock_api, new_order_0=new_order_0, new_order_1=new_order_1
+            )
+
+            self.assertIn(new_order_id_0, self.exchange.in_flight_orders)
+            self.assertIn(new_order_id_1, self.exchange.in_flight_orders)
+
+            create_event_0: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
+            self.assertEqual(self.exchange.current_timestamp, create_event_0.timestamp)
+            self.assertEqual(self.trading_pair, create_event_0.trading_pair)
+            self.assertEqual(OrderType.LIMIT, create_event_0.type)
+            self.assertEqual(order_0_amount, create_event_0.amount)
+            self.assertEqual(order_0_price, create_event_0.price)
+            self.assertEqual(new_order_id_0, create_event_0.order_id)
+            self.assertEqual(str(self.expected_exchange_order_id), create_event_0.exchange_order_id)
+
+            create_event_1: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[1]
+            self.assertEqual(self.exchange.current_timestamp, create_event_1.timestamp)
+            self.assertEqual(self.trading_pair, create_event_1.trading_pair)
+            self.assertEqual(OrderType.LIMIT, create_event_1.type)
+            self.assertEqual(order_1_amount, create_event_1.amount)
+            self.assertEqual(order_1_price, create_event_1.price)
+            self.assertEqual(new_order_id_1, create_event_1.order_id)
+            self.assertEqual(str(self.expected_exchange_order_id), create_event_1.exchange_order_id)
+
+            self.validate_logs_batch_order_create_two_orders(new_order_0=new_order_0, new_order_1=new_order_1)
+
+        @aioresponses()
+        def test_batch_order_create_one_order_fails_validation(self, mock_api):
+            self._simulate_trading_rules_initialized()
+            request_sent_event = asyncio.Event()
+            self.exchange._set_current_timestamp(1640780000)
+
+            url = self.order_creation_url
+
+            creation_response = self.order_creation_request_successful_mock_response
+
+            mock_api.post(url,
+                          body=json.dumps(creation_response),
+                          callback=lambda *args, **kwargs: request_sent_event.set())
+
+            order_0_amount = Decimal("1")
+            order_0_price = Decimal("10")
+            order_0 = self.create_new_buy_order(amount=order_0_amount, price=order_0_price)
+            order_1_amount = Decimal("0")  # fails min order size trading rules validation
+            order_1_price = Decimal("20")
+            order_1 = self.create_new_buy_order(amount=order_1_amount, price=order_1_price)
+
+            orders: Tuple[Order] = self.exchange.batch_order_create(orders_to_create=[order_0, order_1])
+
+            self.assertEqual(2, len(orders))
+
+            self.async_run_with_timeout(request_sent_event.wait())
+
+            new_order_id_0 = orders[0].client_order_id
+            new_order_id_1 = orders[1].client_order_id
+
+            self.assertIn(new_order_id_0, self.exchange.in_flight_orders)
+            self.assertNotIn(new_order_id_1, self.exchange.in_flight_orders)
+
+            create_event_0: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
+            self.assertEqual(self.exchange.current_timestamp, create_event_0.timestamp)
+            self.assertEqual(self.trading_pair, create_event_0.trading_pair)
+            self.assertEqual(OrderType.LIMIT, create_event_0.type)
+            self.assertEqual(order_0_amount, create_event_0.amount)
+            self.assertEqual(order_0_price, create_event_0.price)
+            self.assertEqual(new_order_id_0, create_event_0.order_id)
+            self.assertEqual(str(self.expected_exchange_order_id), create_event_0.exchange_order_id)
+            self.assertTrue(
+                self.is_logged(
+                    "INFO",
+                    f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_id_0} for "
+                    f"{create_event_0.amount} {self.trading_pair}."
+                )
+            )
+
+            failure_event_1: MarketOrderFailureEvent = self.order_failure_logger.event_log[0]
+            self.assertEqual(new_order_id_1, failure_event_1.order_id)
+            self.assertTrue(self.is_logged(
+                log_level="WARNING",
+                message="Buy order amount 0 is lower than the minimum order size 0.01. The order will not be created."
+            ))
+
+        @patch("hummingbot.connector.exchange_py_base.ExchangePyBase._place_batch_order_create")
+        def test_batch_order_create_fails(self, _place_batch_order_create_mock):
+            called_event = asyncio.Event()
+
+            def on_call(*_, **__):
+                called_event.set()
+                raise RuntimeError
+
+            _place_batch_order_create_mock.side_effect = on_call
+            self._simulate_trading_rules_initialized()
+            self.exchange._set_current_timestamp(1640780000)
+
+            order_0_amount = Decimal("1")
+            order_0_price = Decimal("10")
+            order_0 = self.create_new_buy_order(amount=order_0_amount, price=order_0_price)
+            order_1_amount = Decimal("2")
+            order_1_price = Decimal("20")
+            order_1 = self.create_new_buy_order(amount=order_1_amount, price=order_1_price)
+
+            orders: Tuple[Order] = self.exchange.batch_order_create(orders_to_create=[order_0, order_1])
+
+            self.async_run_with_timeout(coroutine=called_event.wait())
+
+            new_order_id_0 = orders[0].client_order_id
+            new_order_id_1 = orders[1].client_order_id
+
+            self.assertNotIn(new_order_id_0, self.exchange.in_flight_orders)
+            self.assertNotIn(new_order_id_1, self.exchange.in_flight_orders)
+
+            self.assertEqual(2, len(self.order_failure_logger.event_log))
+            self.assertEqual(new_order_id_0, self.order_failure_logger.event_log[0].order_id)
+            self.assertEqual(new_order_id_1, self.order_failure_logger.event_log[1].order_id)
+
+            self.assertTrue(self.is_logged(log_level="NETWORK", message="Batch order create failed."))
+            self.assertTrue(
+                self.is_logged(
+                    log_level="NETWORK",
+                    message=(
+                        f"Error submitting {order_0.trade_type.name.lower()} {order_0.order_type.name}"
+                        f" order to {self.exchange.name_cap} for {order_0.amount} {self.trading_pair} {order_0.price}."
+                    ),
+                )
+            )
+            self.assertTrue(
+                self.is_logged(
+                    log_level="NETWORK",
+                    message=(
+                        f"Error submitting {order_1.trade_type.name.lower()} {order_1.order_type.name}"
+                        f" order to {self.exchange.name_cap} for {order_1.amount} {self.trading_pair} {order_1.price}."
+                    ),
+                )
+            )
+
+        @aioresponses()
+        def test_batch_order_create_one_order_failed_on_exchange(self, mock_api):
+            self._simulate_trading_rules_initialized()
+            self.exchange._set_current_timestamp(1640780000)
+
+            self.configure_batch_order_create_event_for_two_orders_one_order_rejected_by_exchange(mock_api=mock_api)
+
+            order_0_amount = Decimal("1")
+            order_0_price = Decimal("10")
+            order_0 = self.create_new_buy_order(amount=order_0_amount, price=order_0_price)
+            order_1_amount = Decimal("2")
+            order_1_price = Decimal("20")
+            order_1 = self.create_new_buy_order(amount=order_1_amount, price=order_1_price)
+
+            orders: Tuple[Order] = self.exchange.batch_order_create(orders_to_create=[order_0, order_1])
+
+            self.assertEqual(2, len(orders))
+
+            self.await_batch_order_create_event()
+
+            new_order_id_0 = orders[0].client_order_id
+            new_order_id_1 = orders[1].client_order_id
+
+            self.assertIn(new_order_id_0, self.exchange.in_flight_orders)
+            self.assertNotIn(new_order_id_1, self.exchange.in_flight_orders)
+
+            new_order_0 = self.exchange.in_flight_orders[new_order_id_0]
+
+            create_event_0: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
+            self.assertEqual(self.exchange.current_timestamp, create_event_0.timestamp)
+            self.assertEqual(self.trading_pair, create_event_0.trading_pair)
+            self.assertEqual(OrderType.LIMIT, create_event_0.type)
+            self.assertEqual(order_0_amount, create_event_0.amount)
+            self.assertEqual(order_0_price, create_event_0.price)
+            self.assertEqual(new_order_id_0, create_event_0.order_id)
+            self.assertEqual(str(self.expected_exchange_order_id), create_event_0.exchange_order_id)
+
+            self.assertEqual(1, len(self.order_failure_logger.event_log))
+
+            failure_event_1 = self.order_failure_logger.event_log[0]
+
+            self.assertEqual(new_order_id_1, failure_event_1.order_id)
+
+            self.validate_logs_batch_order_create_two_orders_one_order_rejected_by_exchange(
+                new_order_0=new_order_0,
+                rejected_order_trade_type=TradeType.BUY,
+                rejected_order_order_type=OrderType.LIMIT,
+                rejected_order_amount=new_order_0.amount + Decimal("1"),
+                rejected_order_price=new_order_0.price + Decimal("10"),
+            )
+
+        @aioresponses()
         def test_create_buy_limit_order_successfully(self, mock_api):
             self._simulate_trading_rules_initialized()
             request_sent_event = asyncio.Event()
@@ -805,6 +1200,148 @@ class AbstractExchangeConnectorTests:
                     f"client_order_id='{order_id}', exchange_order_id=None, misc_updates=None)"
                 )
             )
+            
+        @aioresponses()
+        def test_batch_order_cancel_two_orders_success(self, mock_api):
+            self._simulate_trading_rules_initialized()
+            self.exchange._set_current_timestamp(1640780000)
+
+            self.exchange.start_tracking_order(
+                order_id=self.client_order_id_prefix + "0",
+                exchange_order_id=self.exchange_order_id_prefix + "0",
+                trading_pair=self.trading_pair,
+                trade_type=TradeType.BUY,
+                price=Decimal("10000"),
+                amount=Decimal("100"),
+                order_type=OrderType.LIMIT,
+            )
+            order_to_cancel_0: InFlightOrder = self.exchange.in_flight_orders[self.client_order_id_prefix + "0"]
+
+            self.exchange.start_tracking_order(
+                order_id=self.client_order_id_prefix + "1",
+                exchange_order_id=self.exchange_order_id_prefix + "1",
+                trading_pair=self.trading_pair,
+                trade_type=TradeType.BUY,
+                price=Decimal("20000"),
+                amount=Decimal("200"),
+                order_type=OrderType.LIMIT,
+            )
+            order_to_cancel_1: InFlightOrder = self.exchange.in_flight_orders[self.client_order_id_prefix + "1"]
+            
+            self.configure_batch_order_cancel_event_for_two_orders(
+                mock_api=mock_api, order_to_cancel_0=order_to_cancel_0, order_to_cancel_1=order_to_cancel_1
+            )
+            
+            self.exchange.batch_order_cancel(orders_to_cancel=[order_to_cancel_0, order_to_cancel_1])
+            
+            self.await_batch_order_cancel_event()
+            
+            self.validate_batch_order_cancel_requests(
+                mock_api=mock_api, order_to_cancel_0=order_to_cancel_0, order_to_cancel_1=order_to_cancel_1
+            )
+            
+            if self.is_cancel_request_executed_synchronously_by_server:
+                self.assertNotIn(order_to_cancel_0.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel_0.is_cancelled)
+                cancel_event_0: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
+                self.assertEqual(self.exchange.current_timestamp, cancel_event_0.timestamp)
+                self.assertEqual(order_to_cancel_0.client_order_id, cancel_event_0.order_id)
+
+                self.assertTrue(
+                    self.is_logged(
+                        "INFO",
+                        f"Successfully canceled order {order_to_cancel_0.client_order_id}."
+                    )
+                )
+
+                self.assertNotIn(order_to_cancel_1.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel_1.is_cancelled)
+                cancel_event_1: OrderCancelledEvent = self.order_cancelled_logger.event_log[1]
+                self.assertEqual(self.exchange.current_timestamp, cancel_event_1.timestamp)
+                self.assertEqual(order_to_cancel_1.client_order_id, cancel_event_1.order_id)
+
+                self.assertTrue(
+                    self.is_logged(
+                        "INFO",
+                        f"Successfully canceled order {order_to_cancel_1.client_order_id}."
+                    )
+                )
+            else:
+                self.assertIn(order_to_cancel_0.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel_0.is_pending_cancel_confirmation)
+                self.assertIn(order_to_cancel_1.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel_1.is_pending_cancel_confirmation)
+
+        @aioresponses()
+        def test_batch_order_cancel_two_orders_one_cancelation_fails(self, mock_api):
+            self._simulate_trading_rules_initialized()
+            self.exchange._set_current_timestamp(1640780000)
+
+            self.exchange.start_tracking_order(
+                order_id=self.client_order_id_prefix + "0",
+                exchange_order_id=self.exchange_order_id_prefix + "0",
+                trading_pair=self.trading_pair,
+                trade_type=TradeType.BUY,
+                price=Decimal("10000"),
+                amount=Decimal("100"),
+                order_type=OrderType.LIMIT,
+            )
+            order_to_cancel_0: InFlightOrder = self.exchange.in_flight_orders[self.client_order_id_prefix + "0"]
+
+            self.exchange.start_tracking_order(
+                order_id=self.client_order_id_prefix + "1",
+                exchange_order_id=self.exchange_order_id_prefix + "1",
+                trading_pair=self.trading_pair,
+                trade_type=TradeType.BUY,
+                price=Decimal("20000"),
+                amount=Decimal("200"),
+                order_type=OrderType.LIMIT,
+            )
+            order_to_cancel_1: InFlightOrder = self.exchange.in_flight_orders[self.client_order_id_prefix + "1"]
+
+            self.configure_batch_order_cancel_event_for_two_orders_one_cancelation_fails(
+                mock_api=mock_api, order_to_cancel_0=order_to_cancel_0, order_to_cancel_1=order_to_cancel_1
+            )
+
+            self.exchange.batch_order_cancel(orders_to_cancel=[order_to_cancel_0, order_to_cancel_1])
+
+            self.await_batch_order_cancel_event()
+
+            if self.is_cancel_request_executed_synchronously_by_server:
+                self.assertNotIn(order_to_cancel_0.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel_0.is_cancelled)
+                cancel_event_0: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
+                self.assertEqual(self.exchange.current_timestamp, cancel_event_0.timestamp)
+                self.assertEqual(order_to_cancel_0.client_order_id, cancel_event_0.order_id)
+
+                self.assertTrue(
+                    self.is_logged(
+                        "INFO",
+                        f"Successfully canceled order {order_to_cancel_0.client_order_id}."
+                    )
+                )
+
+                self.assertIn(order_to_cancel_1.client_order_id, self.exchange.in_flight_orders)
+                self.assertFalse(order_to_cancel_1.is_cancelled)
+                self.assertEqual(1, len(self.order_cancelled_logger.event_log))
+
+                self.assertTrue(
+                    self.is_logged(
+                        "ERROR",
+                        f"Failed to cancel order {order_to_cancel_1.client_order_id}"
+                    )
+                )
+            else:
+                self.assertIn(order_to_cancel_0.client_order_id, self.exchange.in_flight_orders)
+                self.assertTrue(order_to_cancel_0.is_pending_cancel_confirmation)
+                self.assertIn(order_to_cancel_1.client_order_id, self.exchange.in_flight_orders)
+                self.assertFalse(order_to_cancel_1.is_pending_cancel_confirmation)
+                self.assertTrue(
+                    self.is_logged(
+                        "ERROR",
+                        f"Failed to cancel order {order_to_cancel_1.client_order_id}"
+                    )
+                )
 
         @aioresponses()
         def test_cancel_order_successfully(self, mock_api):
@@ -948,78 +1485,6 @@ class AbstractExchangeConnectorTests:
                         f"Successfully canceled order {order1.client_order_id}."
                     )
                 )
-
-        @aioresponses()
-        def test_batch_order_update(self, mock_api):
-            self._simulate_trading_rules_initialized()
-            self.exchange._set_current_timestamp(1640780000)
-
-            self.exchange.start_tracking_order(
-                order_id=self.client_order_id_prefix + "1",
-                exchange_order_id=self.exchange_order_id_prefix + "1",
-                trading_pair=self.trading_pair,
-                trade_type=TradeType.BUY,
-                price=Decimal("10000"),
-                amount=Decimal("100"),
-                order_type=OrderType.LIMIT,
-            )
-            order_to_cancel: InFlightOrder = self.exchange.in_flight_orders[self.client_order_id_prefix + "1"]
-
-            self._setup_batch_order_update_responses(mock_api=mock_api, order_to_cancel=order_to_cancel)
-
-            new_buy_order = self.create_new_buy_order()
-            existing_order_to_cancel = Order.from_in_flight_order(in_flight_order=order_to_cancel)
-            orders: Tuple[Order] = self.exchange.batch_order_update(
-                orders_to_create=(new_buy_order,), orders_to_cancel=(existing_order_to_cancel,)
-            )
-
-            self.assertEqual(1, len(orders))
-
-            new_order_id = orders[0].client_order_id
-
-            self._await_batch_order_update_sent()
-
-            self._validate_batch_order_update_requests(
-                mock_api=mock_api,
-                new_order=self.exchange.in_flight_orders[new_order_id],
-                order_to_cancel=order_to_cancel,
-            )
-
-            self.assertIn(new_order_id, self.exchange.in_flight_orders)
-
-            create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
-            self.assertEqual(self.exchange.current_timestamp, create_event.timestamp)
-            self.assertEqual(self.trading_pair, create_event.trading_pair)
-            self.assertEqual(OrderType.LIMIT, create_event.type)
-            self.assertEqual(Decimal("100"), create_event.amount)
-            self.assertEqual(Decimal("10000"), create_event.price)
-            self.assertEqual(new_order_id, create_event.order_id)
-            self.assertEqual(str(self.expected_exchange_order_id), create_event.exchange_order_id)
-
-            self.assertTrue(
-                self.is_logged(
-                    "INFO",
-                    f"Created {OrderType.LIMIT.name} {TradeType.BUY.name} order {new_order_id} for "
-                    f"{Decimal('100.000000')} {self.trading_pair}."
-                )
-            )
-
-            if self.is_cancel_request_executed_synchronously_by_server:
-                self.assertNotIn(order_to_cancel.client_order_id, self.exchange.in_flight_orders)
-                self.assertTrue(order_to_cancel.is_cancelled)
-                cancel_event: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
-                self.assertEqual(self.exchange.current_timestamp, cancel_event.timestamp)
-                self.assertEqual(order_to_cancel.client_order_id, cancel_event.order_id)
-
-                self.assertTrue(
-                    self.is_logged(
-                        "INFO",
-                        f"Successfully canceled order {order_to_cancel.client_order_id}."
-                    )
-                )
-            else:
-                self.assertIn(order_to_cancel.client_order_id, self.exchange.in_flight_orders)
-                self.assertTrue(order_to_cancel.is_pending_cancel_confirmation)
 
         @aioresponses()
         def test_update_balances(self, mock_api):
@@ -1903,40 +2368,3 @@ class AbstractExchangeConnectorTests:
                 "trading_rule_initialized": False,
                 "user_stream_initialized": False,
             }
-
-        def _setup_batch_order_update_responses(self, mock_api, order_to_cancel: InFlightOrder):
-            self.test_events_dict["create"] = asyncio.Event()
-            self.test_events_dict["cancel"] = asyncio.Event()
-
-            self.test_urls_dict["create"] = self.order_creation_url
-            creation_response = self.order_creation_request_successful_mock_response
-            mock_api.post(self.test_urls_dict["create"],
-                          body=json.dumps(creation_response),
-                          callback=lambda *args, **kwargs: self.test_events_dict["create"].set())
-
-            self.test_urls_dict["cancel"] = self.configure_successful_cancelation_response(
-                order=order_to_cancel,
-                mock_api=mock_api,
-                callback=lambda *args, **kwargs: self.test_events_dict["cancel"].set())
-
-        def _await_batch_order_update_sent(self):
-            self.async_run_with_timeout(self.test_events_dict["create"].wait())
-            self.async_run_with_timeout(self.test_events_dict["cancel"].wait())
-
-        def _validate_batch_order_update_requests(
-            self, mock_api, new_order: InFlightOrder, order_to_cancel: InFlightOrder
-        ):
-            create_url = self.test_urls_dict["create"]
-            create_request = self._all_executed_requests(mock_api, create_url)[0]
-            self.validate_auth_credentials_present(create_request)
-            self.validate_order_creation_request(order=new_order, request_call=create_request)
-
-            cancel_url = self.test_urls_dict["cancel"]
-            cancel_request = self._all_executed_requests(mock_api, cancel_url)[
-                1 if create_url == cancel_url
-                else 0
-            ]
-            self.validate_auth_credentials_present(cancel_request)
-            self.validate_order_cancelation_request(
-                order=order_to_cancel,
-                request_call=cancel_request)

@@ -4,7 +4,7 @@ import time
 from asyncio import Lock
 from decimal import Decimal
 from math import floor
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional
 
 from bidict import bidict
 from grpc.aio import UnaryStreamCall
@@ -27,8 +27,9 @@ from pyinjective.proto.injective.exchange.v1beta1.exchange_pb2 import Derivative
 
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import (
-    BatchOrderUpdateResult, CancelOrderResult, GatewayCLOBAPIDataSourceBase, PlaceOrderResult,
+    BatchOrderUpdateResult, GatewayCLOBAPIDataSourceBase
 )
+from hummingbot.core.data_type.order import CancelOrderResult, PlaceOrderResult
 from hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_constants import (
     ACC_NONCE_PATH_RATE_LIMIT_ID,
     BACKEND_TO_CLIENT_ORDER_STATE_MAP,
@@ -53,7 +54,7 @@ from hummingbot.core.data_type.trade_fee import MakerTakerExchangeFeeRates, Toke
 from hummingbot.core.event.events import AccountEvent, BalanceUpdateEvent, MarketEvent, OrderBookDataSourceEvent
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
 from hummingbot.core.network_iterator import NetworkStatus
-from hummingbot.core.utils.async_utils import safe_ensure_future
+from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.logger import HummingbotLogger
 
@@ -203,6 +204,7 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
         }
         result = PlaceOrderResult(
             success=True,
+            update_timestamp=self._time(),
             client_order_id=order.client_order_id,
             exchange_order_id=order_hash,
             trading_pair=order.trading_pair,
@@ -244,11 +246,23 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
         return result
 
     async def batch_order_update(
-        self, orders_to_create: List[GatewayInFlightOrder], orders_to_cancel: List[GatewayInFlightOrder]
+        self, orders_to_create: List[InFlightOrder], orders_to_cancel: List[InFlightOrder]
     ) -> BatchOrderUpdateResult:
-        await asyncio.gather(*[order.get_exchange_order_id() for order in orders_to_cancel])
+        in_flight_orders_to_cancel = [
+            self._gateway_order_tracker.fetch_tracked_order(client_order_id=order.client_order_id)
+            for order in orders_to_cancel
+        ]
+        exchange_order_ids_to_cancel = await safe_gather(
+            *[order.get_exchange_order_id() for order in in_flight_orders_to_cancel],
+            return_exceptions=True,
+        )
+        found_orders_to_cancel = [
+            order
+            for order, result in zip(orders_to_cancel, exchange_order_ids_to_cancel)
+            if not isinstance(result, asyncio.TimeoutError)
+        ]
 
-        spot_order_to_create = [
+        spot_orders_to_create = [
             self._composer.SpotOrder(
                 market_id=self._trading_pair_to_active_spot_markets[order.trading_pair].market_id,
                 subaccount_id=self._sub_account_id,
@@ -262,23 +276,24 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
 
         async with self._order_placement_lock:
             order_hashes = self._order_hash_manager.compute_order_hashes(
-                spot_orders=spot_order_to_create, derivative_orders=[]
+                spot_orders=spot_orders_to_create, derivative_orders=[]
             )
             update_result = await self._get_gateway_instance().clob_batch_order_update(
                 connector=self._connector_name,
                 chain=self._chain,
                 network=self._network,
-                trading_pair=orders_to_create[0].trading_pair,
                 address=self._sub_account_id,
                 orders_to_create=orders_to_create,
-                orders_to_cancel=orders_to_cancel,
+                orders_to_cancel=found_orders_to_cancel,
             )
 
+        success = True
         transaction_hash: Optional[str] = update_result.get("txHash")
 
         if transaction_hash is None:
             await self._update_account_address_and_create_order_hash_manager()
-            raise ValueError(f"The batch order update transaction failed.")
+            self.logger().error("The batch order update transaction failed.")
+            success = False
 
         transaction_hash = f"0x{transaction_hash.lower()}"
 
@@ -286,6 +301,8 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
             place_order_results=tuple(
                 [
                     PlaceOrderResult(
+                        success=success,
+                        update_timestamp=self._time(),
                         client_order_id=order.client_order_id,
                         exchange_order_id=order_hash,
                         trading_pair=order.trading_pair,
@@ -298,13 +315,15 @@ class InjectiveAPIDataSource(GatewayCLOBAPIDataSourceBase):
             cancel_order_results=tuple(
                 [
                     CancelOrderResult(
+                        success=success and not isinstance(exchange_order_id, Exception),
                         client_order_id=order.client_order_id,
                         trading_pair=order.trading_pair,
-                        success=True,
                         misc_updates={
                             "cancelation_transaction_hash": transaction_hash
-                        }
-                    ) for order in orders_to_cancel
+                        },
+                        not_found=isinstance(exchange_order_id, asyncio.TimeoutError),
+                        exception=exchange_order_id if isinstance(exchange_order_id, Exception) else None,
+                    ) for order, exchange_order_id in zip(orders_to_cancel, exchange_order_ids_to_cancel)
                 ]
             )
         )

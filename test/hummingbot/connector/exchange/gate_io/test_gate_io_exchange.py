@@ -19,6 +19,7 @@ from hummingbot.connector.utils import get_new_client_order_id
 from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, PositionAction, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.data_type.trade_fee import TokenAmount
 from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import (
@@ -444,15 +445,17 @@ class TestGateIoExchange(unittest.TestCase):
         mock_api.post(regex_url, body=json.dumps(resp), status=201)
 
         order_id = "someId"
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("1"),
+            price=Decimal("5.1"),
+            client_order_id=order_id,
+        )
+
         self.async_run_with_timeout(
-            coroutine=self.exchange._create_order(
-                trade_type=TradeType.BUY,
-                order_id=order_id,
-                trading_pair=self.trading_pair,
-                amount=Decimal("1"),
-                order_type=OrderType.LIMIT,
-                price=Decimal("5.1"),
-            )
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
         )
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
@@ -492,15 +495,17 @@ class TestGateIoExchange(unittest.TestCase):
         self.exchange.add_listener(MarketEvent.BuyOrderCreated, event_logger)
 
         order_id = "someId"
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("1"),
+            price=Decimal("5.1"),
+            client_order_id=order_id,
+        )
+
         self.async_run_with_timeout(
-            coroutine=self.exchange._create_order(
-                trade_type=TradeType.BUY,
-                order_id=order_id,
-                trading_pair=self.trading_pair,
-                amount=Decimal("1"),
-                order_type=OrderType.LIMIT,
-                price=Decimal("5.1"),
-            )
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
         )
 
         self.assertIn(order_id, self.exchange.in_flight_orders)
@@ -525,15 +530,17 @@ class TestGateIoExchange(unittest.TestCase):
         mock_api.post(regex_url, exception=Exception("The request should never happen"))
 
         order_id = "someId"
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("0.0001"),
+            price=Decimal("5.1"),
+            client_order_id=order_id,
+        )
+
         self.async_run_with_timeout(
-            coroutine=self.exchange._create_order(
-                trade_type=TradeType.BUY,
-                order_id=order_id,
-                trading_pair=self.trading_pair,
-                amount=Decimal("0.0001"),
-                order_type=OrderType.LIMIT,
-                price=Decimal("5.1"),
-            )
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
         )
 
         self.assertEqual(0, len(self.buy_order_created_logger.event_log))
@@ -558,15 +565,17 @@ class TestGateIoExchange(unittest.TestCase):
         mock_api.post(regex_url, body=json.dumps(resp))
 
         order_id = "someId"
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("1"),
+            price=Decimal("5.1"),
+            client_order_id=order_id,
+        )
+
         self.async_run_with_timeout(
-            coroutine=self.exchange._create_order(
-                trade_type=TradeType.BUY,
-                order_id=order_id,
-                trading_pair=self.trading_pair,
-                amount=Decimal("1"),
-                order_type=OrderType.LIMIT,
-                price=Decimal("5.1"),
-            )
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
         )
 
         self.assertEqual(0, len(self.buy_order_created_logger.event_log))
@@ -583,13 +592,18 @@ class TestGateIoExchange(unittest.TestCase):
         mock_api.post(regex_url, status=400)
 
         order_id = "OID1"
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("100"),
+            price=Decimal("10000"),
+            client_order_id=order_id,
+        )
+
         self.async_run_with_timeout(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id=order_id,
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.LIMIT,
-                                        price=Decimal("10000")))
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
 
         self.assertNotIn("OID1", self.exchange.in_flight_orders)
         self.assertEqual(0, len(self.buy_order_created_logger.event_log))
@@ -628,7 +642,7 @@ class TestGateIoExchange(unittest.TestCase):
         resp = self.get_order_create_response_mock(cancelled=True)
         mock_api.delete(regex_url, body=json.dumps(resp))
 
-        self.async_run_with_timeout(self.exchange._execute_cancel(self.trading_pair, client_order_id))
+        self.async_run_with_timeout(self.exchange._execute_batch_cancel(order_ids_to_cancel=[client_order_id]))
 
         cancel_request = next(((key, value) for key, value in mock_api.requests.items()
                                if key[1].human_repr().startswith(url)))
@@ -705,9 +719,8 @@ class TestGateIoExchange(unittest.TestCase):
         order = self.exchange.in_flight_orders["OID1"]
         order.exchange_order_id_update_event = update_event
 
-        self.async_run_with_timeout(self.exchange._execute_cancel(
-            trading_pair=order.trading_pair,
-            order_id=order.client_order_id,
+        self.async_run_with_timeout(self.exchange._execute_batch_cancel(
+            order_ids_to_cancel=[order.client_order_id]
         ))
 
         self.assertEqual(0, len(self.order_cancelled_logger.event_log))
@@ -715,15 +728,14 @@ class TestGateIoExchange(unittest.TestCase):
         self.assertTrue(
             self._is_logged(
                 "WARNING",
-                f"Failed to cancel the order {order.client_order_id} because it does not have an exchange order id yet"
+                f"Failed to cancel the order {order.client_order_id} due to the order not being found."
             )
         )
 
         # After the fourth time not finding the exchange order id the order should be marked as failed
         for i in range(self.exchange._order_tracker._lost_order_count_limit + 1):
-            self.async_run_with_timeout(self.exchange._execute_cancel(
-                trading_pair=order.trading_pair,
-                order_id=order.client_order_id,
+            self.async_run_with_timeout(self.exchange._execute_batch_cancel(
+                order_ids_to_cancel=[order.client_order_id]
             ))
 
         self.assertTrue(order.is_failure)

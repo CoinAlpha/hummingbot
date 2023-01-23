@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 import aiohttp
 
 from hummingbot.client.config.security import Security
-from hummingbot.connector.gateway.gateway_in_flight_order import GatewayInFlightOrder
 from hummingbot.core.data_type.common import OrderType, PositionSide
+from hummingbot.core.data_type.in_flight_order import InFlightOrder
 from hummingbot.core.event.events import TradeType
 from hummingbot.logger import HummingbotLogger
 
@@ -1226,25 +1226,31 @@ class GatewayHttpClient:
         connector: str,
         chain: str,
         network: str,
-        trading_pair: str,
         address: str,
-        orders_to_create: List[GatewayInFlightOrder],
-        orders_to_cancel: List[GatewayInFlightOrder],
+        orders_to_create: List[InFlightOrder],
+        orders_to_cancel: List[InFlightOrder],
     ):
         request_payload = {
-            "market": trading_pair,
             "chain": chain,
             "network": network,
             "connector": connector,
             "address": address,
-            "createOrderParams": [
+        }
+        if len(orders_to_create) != 0:
+            request_payload["createOrderParams"] = [
                 {
+                    "market": order.trading_pair,
                     "price": str(order.price),
                     "amount": str(order.amount),
                     "side": order.trade_type.name,
                     "orderType": order.order_type.name,
                 } for order in orders_to_create
-            ],
-            "cancelOrderIds": [order.client_order_id for order in orders_to_cancel],
-        }
+            ]
+        if len(orders_to_cancel) != 0:
+            request_payload["cancelOrderParams"] = [
+                {
+                    "market": order.trading_pair,
+                    "orderId": order.client_order_id,
+                } for order in orders_to_cancel
+            ]
         return await self.api_request("post", "clob/batchOrders", request_payload)

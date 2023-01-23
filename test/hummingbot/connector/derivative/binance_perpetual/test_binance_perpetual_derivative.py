@@ -25,6 +25,7 @@ from hummingbot.connector.utils import get_new_client_order_id
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
 from hummingbot.core.data_type.limit_order import LimitOrder
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.data_type.trade_fee import TokenAmount
 from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import MarketEvent, OrderFilledEvent
@@ -1678,13 +1679,14 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
 
         self.assertTrue("OID1" in self.exchange._order_tracker._in_flight_orders)
 
-        canceled_order_id = self.async_run_with_timeout(self.exchange._execute_cancel(trading_pair=self.trading_pair,
-                                                                                      order_id="OID1"))
+        cancelation_results = self.async_run_with_timeout(
+            self.exchange._execute_batch_cancel(order_ids_to_cancel=["OID1"])
+        )
 
         order_cancelled_events = self.order_cancelled_logger.event_log
 
         self.assertEqual(1, len(order_cancelled_events))
-        self.assertEqual("OID1", canceled_order_id)
+        self.assertEqual("OID1", cancelation_results[0].order_id)
 
     @aioresponses()
     def test_cancel_order_failed(self, mock_api):
@@ -1736,7 +1738,7 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
 
         self.assertTrue("OID1" in self.exchange._order_tracker._in_flight_orders)
 
-        self.async_run_with_timeout(self.exchange._execute_cancel(trading_pair=self.trading_pair, order_id="OID1"))
+        self.async_run_with_timeout(self.exchange._execute_batch_cancel(order_ids_to_cancel=["OID1"]))
 
         order_cancelled_events = self.order_cancelled_logger.event_log
 
@@ -1754,14 +1756,17 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
                            "orderId": "8886774"}
         req_mock.post(regex_url, body=json.dumps(create_response))
         self._simulate_trading_rules_initialized()
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("10000"),
+            price=Decimal("10000"),
+            client_order_id="OID1",
+            kwargs={"position_action": PositionAction.OPEN},
+        )
 
-        self.async_run_with_timeout(self.exchange._create_order(trade_type=TradeType.BUY,
-                                                                order_id="OID1",
-                                                                trading_pair=self.trading_pair,
-                                                                amount=Decimal("10000"),
-                                                                order_type=OrderType.LIMIT,
-                                                                position_action=PositionAction.OPEN,
-                                                                price=Decimal("10000")))
+        self.async_run_with_timeout(self.exchange._execute_batch_order_create(orders_to_create=[order]))
 
         self.assertTrue("OID1" in self.exchange._order_tracker._in_flight_orders)
 
@@ -1777,14 +1782,17 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
                            "orderId": "8886774"}
         req_mock.post(regex_url, body=json.dumps(create_response))
         self._simulate_trading_rules_initialized()
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT_MAKER,
+            trade_type=TradeType.BUY,
+            amount=Decimal("10000"),
+            price=Decimal("10000"),
+            client_order_id="OID1",
+            kwargs={"position_action": PositionAction.OPEN},
+        )
 
-        self.async_run_with_timeout(self.exchange._create_order(trade_type=TradeType.BUY,
-                                                                order_id="OID1",
-                                                                trading_pair=self.trading_pair,
-                                                                amount=Decimal("10000"),
-                                                                order_type=OrderType.LIMIT_MAKER,
-                                                                position_action=PositionAction.OPEN,
-                                                                price=Decimal("10000")))
+        self.async_run_with_timeout(self.exchange._execute_batch_order_create(orders_to_create=[order]))
 
         self.assertTrue("OID1" in self.exchange._order_tracker._in_flight_orders)
 
@@ -1796,13 +1804,17 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
         regex_url = re.compile(f"^{url}".replace(".", r"\.").replace("?", r"\?"))
         req_mock.post(regex_url, exception=Exception())
         self._simulate_trading_rules_initialized()
-        self.async_run_with_timeout(self.exchange._create_order(trade_type=TradeType.BUY,
-                                                                order_id="OID1",
-                                                                trading_pair=self.trading_pair,
-                                                                amount=Decimal("10000"),
-                                                                order_type=OrderType.LIMIT,
-                                                                position_action=PositionAction.OPEN,
-                                                                price=Decimal("1010")))
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("10000"),
+            price=Decimal("1010"),
+            client_order_id="OID1",
+            kwargs={"position_action": PositionAction.OPEN},
+        )
+
+        self.async_run_with_timeout(self.exchange._execute_batch_order_create(orders_to_create=[order]))
 
         self.assertTrue("OID1" not in self.exchange._order_tracker._in_flight_orders)
 
@@ -1823,14 +1835,17 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
         self.exchange._trading_rules[self.trading_pair] = trading_rules[0]
         trade_type = TradeType.BUY
         amount = Decimal("2")
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=amount,
+            price=Decimal("1010"),
+            client_order_id="OID1",
+            kwargs={"position_action": PositionAction.OPEN},
+        )
 
-        self.async_run_with_timeout(self.exchange._create_order(trade_type=trade_type,
-                                                                order_id="OID1",
-                                                                trading_pair=self.trading_pair,
-                                                                amount=amount,
-                                                                order_type=OrderType.LIMIT,
-                                                                position_action=PositionAction.OPEN,
-                                                                price=Decimal("1010")))
+        self.async_run_with_timeout(self.exchange._execute_batch_order_create(orders_to_create=[order]))
 
         self.assertTrue("OID1" not in self.exchange._order_tracker._in_flight_orders)
 
@@ -1852,14 +1867,17 @@ class BinancePerpetualDerivativeUnitTest(unittest.TestCase):
         trade_type = TradeType.BUY
         amount = Decimal("2")
         price = Decimal("4")
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=trade_type,
+            amount=amount,
+            price=price,
+            client_order_id="OID1",
+            kwargs={"position_action": PositionAction.OPEN},
+        )
 
-        self.async_run_with_timeout(self.exchange._create_order(trade_type=trade_type,
-                                                                order_id="OID1",
-                                                                trading_pair=self.trading_pair,
-                                                                amount=amount,
-                                                                order_type=OrderType.LIMIT,
-                                                                position_action=PositionAction.OPEN,
-                                                                price=price))
+        self.async_run_with_timeout(self.exchange._execute_batch_order_create(orders_to_create=[order]))
 
         self.assertTrue("OID1" not in self.exchange._order_tracker._in_flight_orders)
 

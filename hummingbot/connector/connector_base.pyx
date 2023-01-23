@@ -1,7 +1,7 @@
 import asyncio
 import time
 from decimal import Decimal
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from hummingbot.client.config.trade_fee_schema_loader import TradeFeeSchemaLoader
 from hummingbot.connector.in_flight_order_base import InFlightOrderBase
@@ -230,43 +230,44 @@ cdef class ConnectorBase(NetworkIterator):
         NetworkIterator.c_stop(self, clock)
         self._trade_volume_metric_collector.stop()
 
-    def batch_order_update(
-        self, orders_to_create: Optional[List[Order]] = None, orders_to_cancel: Optional[List[Order]] = None
-    ) -> Tuple[Order]:
-        """
-        Issues a batch order update allowing the creation and cancelation of orders as a single API request for
-        exchanges that implement this feature. The default implementation of this method is to send the requests
-        one by one.
-        :param orders_to_create: An iterable of Order objects representing the orders to create.
-        :param orders_to_cancel: A iterable of Order objects representing the orders to cancel.
-        :returns: A tuple composed of the order creation objects, updated with the respective client order ID.
-        """
-        orders_to_create = orders_to_create or []
-        orders_to_cancel = orders_to_cancel or []
+    cdef tuple c_batch_order_create(self, list orders_to_create):
+        return self.batch_order_create(orders_to_create=orders_to_create)
 
-        created_orders = tuple(orders_to_create)
-        for order in created_orders:
-            order.client_order_id = (
-                self.buy(
-                    trading_pair=order.trading_pair,
-                    amount=order.amount,
-                    order_type=order.order_type,
-                    price=order.price,
-                    **order.kwargs
-                ) if order.trade_type == TradeType.BUY
-                else self.sell(
+    def batch_order_create(self, orders_to_create: List[Order]) -> Tuple[Order]:
+        """
+        Issues a batch order creation as a single API request for exchanges that implement this feature. The default
+        implementation of this method is to send the requests discretely (one by one).
+        :param orders_to_create: A list of Order objects representing the orders to create.
+        :returns: A tuple composed of the order creation objects, updated with the respective client order ID. If the
+            creation was not successful, the ID is not updated.
+        """
+        creation_result = tuple(orders_to_create)
+        for order in creation_result:
+            try:
+                method = self.buy if order.trade_type == TradeType.BUY else self.sell
+                order.client_order_id = method(
                     trading_pair=order.trading_pair,
                     amount=order.amount,
                     order_type=order.order_type,
                     price=order.price,
                     **order.kwargs
                 )
-            )
+            except Exception:
+                self.logger().exception(f"Failed to create {order}.")
 
-        for order in orders_to_cancel:
-            self.cancel(order.trading_pair, order.client_order_id)
+        return creation_result
 
-        return created_orders
+    cdef c_batch_order_cancel(self, list[tuple] orders_to_cancel):
+        self.batch_order_cancel(orders_to_cancel=orders_to_cancel)
+
+    def batch_order_cancel(self, orders_to_cancel: List[Tuple[str, str]]):
+        """
+        Issues a batch order cancelation as a single API request for exchanges that implement this feature. The default
+        implementation of this method is to send the requests discretely (one by one).
+        :param orders_to_cancel: A list of trading-pair, client order ID tuples.
+        """
+        for trading_pair, client_order_id in orders_to_cancel:
+            self.cancel(trading_pair=trading_pair, client_order_id=client_order_id)
 
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
         """

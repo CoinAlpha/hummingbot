@@ -2869,7 +2869,6 @@ definitions:
       - 'network'
       - 'connector'
       - 'address'
-      - 'market'
       - 'createOrderParams'
       - 'cancelOrderIds'
     properties:

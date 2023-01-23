@@ -21,6 +21,7 @@ from hummingbot.connector.utils import combine_to_hb_trading_pair
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, PositionSide, TradeType
 from hummingbot.core.data_type.funding_info import FundingInfo
 from hummingbot.core.data_type.in_flight_order import InFlightOrder
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase, TradeFeeSchema
 
 
@@ -1019,22 +1020,28 @@ class BitgetPerpetualDerivativeTests(AbstractPerpetualDerivativeTests.PerpetualD
     def test_create_order_with_invalid_position_action_raises_value_error(self):
         self._simulate_trading_rules_initialized()
 
-        with self.assertRaises(ValueError) as exception_context:
-            asyncio.get_event_loop().run_until_complete(
-                self.exchange._create_order(
-                    trade_type=TradeType.BUY,
-                    order_id="C1",
-                    trading_pair=self.trading_pair,
-                    amount=Decimal("1"),
-                    order_type=OrderType.LIMIT,
-                    price=Decimal("46000"),
-                    position_action=PositionAction.NIL,
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("1"),
+            price=Decimal("46000"),
+            client_order_id="C1",
+            kwargs={"position_action": PositionAction.NIL},
+        )
+
+        asyncio.get_event_loop().run_until_complete(
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
+
+        self.assertTrue(
+            self.is_logged(
+                log_level="ERROR",
+                message=(
+                    f"Invalid position action {PositionAction.NIL}."
+                    f" Must be one of {[PositionAction.OPEN, PositionAction.CLOSE]}"
                 ),
             )
-
-        self.assertEqual(
-            f"Invalid position action {PositionAction.NIL}. Must be one of {[PositionAction.OPEN, PositionAction.CLOSE]}",
-            str(exception_context.exception)
         )
 
     def test_get_buy_and_sell_collateral_tokens(self):

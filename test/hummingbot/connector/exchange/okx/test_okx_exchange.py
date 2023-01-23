@@ -483,8 +483,8 @@ class OkxExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests):
         self.assertEqual("cash", request_data["tdMode"])
         self.assertEqual(order.trade_type.name.lower(), request_data["side"])
         self.assertEqual(order.order_type.name.lower(), request_data["ordType"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["sz"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["px"]))
+        self.assertEqual(order.amount, Decimal(request_data["sz"]))
+        self.assertEqual(order.price, Decimal(request_data["px"]))
         self.assertEqual(order.client_order_id, request_data["clOrdId"])
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):

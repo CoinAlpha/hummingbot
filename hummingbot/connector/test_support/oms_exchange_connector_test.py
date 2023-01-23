@@ -397,8 +397,8 @@ class OMSExchangeTests:
             self.assertEqual(request_data[CONSTANTS.ACCOUNT_ID_FIELD], self.account_id)
             self.assertEqual(request_data[CONSTANTS.TIME_IN_FORCE_FIELD], CONSTANTS.GTC_TIF)
             self.assertEqual(request_data[CONSTANTS.CLIENT_ORDER_ID_FIELD], int(order.client_order_id))
-            self.assertEqual(request_data[CONSTANTS.QUANTITY_FIELD], Decimal("100"))
-            self.assertEqual(request_data[CONSTANTS.LIMIT_PRICE_FIELD], Decimal("10000"))
+            self.assertEqual(request_data[CONSTANTS.QUANTITY_FIELD], order.amount)
+            self.assertEqual(request_data[CONSTANTS.LIMIT_PRICE_FIELD], order.price)
             self.assertEqual(request_data[CONSTANTS.ORDER_TYPE_FIELD], CONSTANTS.LIMIT_ORDER_TYPE)
 
         def validate_order_status_request(self, order: InFlightOrder, request_call: RequestCall):

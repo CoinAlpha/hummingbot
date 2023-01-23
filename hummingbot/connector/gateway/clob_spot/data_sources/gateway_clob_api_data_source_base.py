@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from bidict import bidict
 
@@ -11,6 +11,7 @@ from hummingbot.connector.gateway.gateway_in_flight_order import GatewayInFlight
 from hummingbot.connector.gateway.gateway_order_tracker import GatewayOrderTracker
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
+from hummingbot.core.data_type.order import CancelOrderResult, PlaceOrderResult
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.trade_fee import MakerTakerExchangeFeeRates
 from hummingbot.core.event.event_forwarder import EventForwarder
@@ -18,23 +19,6 @@ from hummingbot.core.event.event_listener import EventListener
 from hummingbot.core.event.events import AccountEvent, MarketEvent, OrderBookDataSourceEvent
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.pubsub import HummingbotLogger, PubSub
-
-
-@dataclass
-class PlaceOrderResult:
-    success: bool
-    client_order_id: str
-    exchange_order_id: Optional[str]
-    trading_pair: str
-    misc_updates: Dict[str, Any]
-
-
-@dataclass
-class CancelOrderResult:
-    success: bool
-    client_order_id: str
-    trading_pair: str
-    misc_updates: Dict[str, Any]
 
 
 @dataclass

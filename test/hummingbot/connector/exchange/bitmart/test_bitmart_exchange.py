@@ -369,8 +369,8 @@ class BitmartExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests
                          request_data["symbol"])
         self.assertEqual("limit", request_data["type"])
         self.assertEqual(order.trade_type.name.lower(), request_data["side"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["size"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["price"]))
+        self.assertEqual(order.amount, Decimal(request_data["size"]))
+        self.assertEqual(order.price, Decimal(request_data["price"]))
         self.assertEqual(order.client_order_id, request_data["clientOrderId"])
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):

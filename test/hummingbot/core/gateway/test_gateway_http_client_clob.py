@@ -100,7 +100,6 @@ class GatewayHttpClientUnitTest(unittest.TestCase):
             connector="injective",
             chain="injective",
             network="mainnet",
-            trading_pair=trading_pair,
             address="0xc7287236f64484b476cfbec0fd21bc49d85f8850c8885665003928a122041e18",  # noqa: mock
             orders_to_create=[order_to_create],
             orders_to_cancel=[order_to_cancel],

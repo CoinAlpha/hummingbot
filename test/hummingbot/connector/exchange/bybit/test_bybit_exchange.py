@@ -20,6 +20,7 @@ from hummingbot.connector.utils import get_new_client_order_id
 from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
+from hummingbot.core.data_type.order import Order
 from hummingbot.core.data_type.trade_fee import TokenAmount
 from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import (
@@ -394,14 +395,18 @@ class TestBybitExchange(unittest.TestCase):
         mock_api.post(regex_url,
                       body=json.dumps(creation_response),
                       callback=lambda *args, **kwargs: request_sent_event.set())
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("100"),
+            price=Decimal("10000"),
+            client_order_id="OID1",
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id="OID1",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.LIMIT,
-                                        price=Decimal("10000")))
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
         self.async_run_with_timeout(request_sent_event.wait())
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
@@ -468,14 +473,18 @@ class TestBybitExchange(unittest.TestCase):
         mock_api.post(regex_url,
                       body=json.dumps(creation_response),
                       callback=lambda *args, **kwargs: request_sent_event.set())
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT_MAKER,
+            trade_type=TradeType.BUY,
+            amount=Decimal("100"),
+            price=Decimal("10000"),
+            client_order_id="OID1",
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id="OID1",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.LIMIT_MAKER,
-                                        price=Decimal("10000")))
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
         self.async_run_with_timeout(request_sent_event.wait())
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
@@ -542,13 +551,17 @@ class TestBybitExchange(unittest.TestCase):
         mock_api.post(regex_url,
                       body=json.dumps(creation_response),
                       callback=lambda *args, **kwargs: request_sent_event.set())
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.MARKET,
+            trade_type=TradeType.SELL,
+            amount=Decimal("100"),
+            client_order_id="OID1",
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.SELL,
-                                        order_id="OID1",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.MARKET))
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
         self.async_run_with_timeout(request_sent_event.wait())
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
@@ -591,14 +604,18 @@ class TestBybitExchange(unittest.TestCase):
         mock_api.post(regex_url,
                       status=400,
                       callback=lambda *args, **kwargs: request_sent_event.set())
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("100"),
+            price=Decimal("10000"),
+            client_order_id="OID1",
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id="OID1",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.LIMIT,
-                                        price=Decimal("10000")))
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
         self.async_run_with_timeout(request_sent_event.wait())
 
         order_request = next(((key, value) for key, value in mock_api.requests.items()
@@ -635,22 +652,30 @@ class TestBybitExchange(unittest.TestCase):
         mock_api.post(regex_url,
                       status=400,
                       callback=lambda *args, **kwargs: request_sent_event.set())
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("0.0001"),
+            price=Decimal("0.0000001"),
+            client_order_id="OID1",
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id="OID1",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("0.0001"),
-                                        order_type=OrderType.LIMIT,
-                                        price=Decimal("0.0000001")))
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
         # The second order is used only to have the event triggered and avoid using timeouts for tests
-        asyncio.get_event_loop().create_task(
-            self.exchange._create_order(trade_type=TradeType.BUY,
-                                        order_id="OID2",
-                                        trading_pair=self.trading_pair,
-                                        amount=Decimal("100"),
-                                        order_type=OrderType.LIMIT,
-                                        price=Decimal("10000")))
+        order = Order(
+            trading_pair=self.trading_pair,
+            order_type=OrderType.LIMIT,
+            trade_type=TradeType.BUY,
+            amount=Decimal("100"),
+            price=Decimal("10000"),
+            client_order_id="OID2",
+        )
+        self.test_task = asyncio.get_event_loop().create_task(
+            self.exchange._execute_batch_order_create(orders_to_create=[order])
+        )
 
         self.async_run_with_timeout(request_sent_event.wait())
 

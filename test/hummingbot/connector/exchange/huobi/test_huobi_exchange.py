@@ -442,8 +442,8 @@ class HuobiExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests):
         test_order_type = f"{order.trade_type.name.lower()}-limit"
         self.assertEqual(self.exchange_symbol_for_tokens(self.base_asset, self.quote_asset), request_data["symbol"])
         self.assertEqual(test_order_type, request_data["type"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["amount"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["price"]))
+        self.assertEqual(order.amount, Decimal(request_data["amount"]))
+        self.assertEqual(order.price, Decimal(request_data["price"]))
         self.assertEqual(order.client_order_id, request_data["client-order-id"])
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):

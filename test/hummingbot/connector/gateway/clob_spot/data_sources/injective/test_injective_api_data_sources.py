@@ -12,9 +12,8 @@ from bidict import bidict
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from hummingbot.connector.exchange_base import ExchangeBase
-from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import (
-    PlaceOrderResult, CancelOrderResult, BatchOrderUpdateResult
-)
+from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import BatchOrderUpdateResult
+from hummingbot.core.data_type.order import CancelOrderResult, PlaceOrderResult
 from hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_api_data_source import (
     InjectiveAPIDataSource,
 )
@@ -194,6 +193,7 @@ class InjectiveAPIDataSourceTest(unittest.TestCase):
             exchange_order_id=expected_exchange_order_id_for_cancel,
             creation_transaction_hash=creation_transaction_hash_for_cancel,
         )
+        self.data_source.gateway_order_tracker.start_tracking_order(order=order_to_cancel)
         self.injective_async_client_mock.configure_batch_order_update_response(
             timestamp=self.initial_timestamp,
             transaction_hash=expected_transaction_hash,

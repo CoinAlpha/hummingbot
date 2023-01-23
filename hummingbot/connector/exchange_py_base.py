@@ -3,7 +3,7 @@ import copy
 import logging
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, AsyncIterable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, AsyncIterable, Dict, List, Optional, Tuple, Union
 
 from async_timeout import timeout
 
@@ -19,6 +19,7 @@ from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
 from hummingbot.core.data_type.limit_order import LimitOrder
+from hummingbot.core.data_type.order import Order, PlaceOrderResult, CancelOrderResult
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_tracker import OrderBookTracker
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
@@ -208,6 +209,21 @@ class ExchangePyBase(ExchangeBase, ABC):
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception) -> bool:
         raise NotImplementedError
 
+    async def _place_batch_order_create(
+        self, orders_with_kwargs_to_create: List[Tuple[InFlightOrder, Dict[str, Any]]]
+    ) -> List[PlaceOrderResult]:
+        """Overwrite this method if the exchange allows batch order creation.
+        :param orders_with_kwargs_to_create: A list of tuples of in-flight orders to create and order-creation kwargs
+            to use in the creation.
+        """
+        raise NotImplementedError
+
+    async def _place_batch_order_cancel(self, orders_to_cancel: List[InFlightOrder]) -> List[CancelOrderResult]:
+        """Overwrite this method if the exchange allows batch order creation.
+        :param orders_to_cancel: The in-flight orders to cancel.
+        """
+        raise NotImplementedError
+
     # === Price logic ===
 
     def get_order_price_quantum(self, trading_pair: str, price: Decimal) -> Decimal:
@@ -312,14 +328,16 @@ class ExchangePyBase(ExchangeBase, ABC):
             hbot_order_id_prefix=self.client_order_id_prefix,
             max_id_len=self.client_order_id_max_length
         )
-        safe_ensure_future(self._create_order(
-            trade_type=TradeType.BUY,
-            order_id=order_id,
+        order = Order(
             trading_pair=trading_pair,
-            amount=amount,
             order_type=order_type,
+            trade_type=TradeType.BUY,
+            amount=amount,
             price=price,
-            **kwargs))
+            client_order_id=order_id,
+            kwargs=kwargs,
+        )
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=[order]))
         return order_id
 
     def sell(self,
@@ -342,15 +360,44 @@ class ExchangePyBase(ExchangeBase, ABC):
             hbot_order_id_prefix=self.client_order_id_prefix,
             max_id_len=self.client_order_id_max_length
         )
-        safe_ensure_future(self._create_order(
-            trade_type=TradeType.SELL,
-            order_id=order_id,
+        order = Order(
             trading_pair=trading_pair,
-            amount=amount,
             order_type=order_type,
+            trade_type=TradeType.SELL,
+            amount=amount,
             price=price,
-            **kwargs))
+            client_order_id=order_id,
+            kwargs=kwargs,
+        )
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=[order]))
         return order_id
+
+    def batch_order_create(self, orders_to_create: List[Order]) -> Tuple[Order]:
+        """
+        Issues a batch order creation as a single API request for exchanges that implement this feature. The default
+        implementation of this method is to send the requests discretely (one by one).
+        :param orders_to_create: A list of Order objects representing the orders to create.
+        :returns: A tuple composed of the order creation objects, updated with the respective client order ID. If the
+            creation was not successful, the ID is not updated.
+        """
+        creation_result = tuple(orders_to_create)
+        for order in creation_result:
+            order.client_order_id = get_new_client_order_id(
+                is_buy=order.trade_type == TradeType.BUY,
+                trading_pair=order.trading_pair,
+                hbot_order_id_prefix=self.client_order_id_prefix,
+                max_id_len=self.client_order_id_max_length
+            )
+        safe_ensure_future(self._execute_batch_order_create(orders_to_create=orders_to_create))
+        return creation_result
+
+    def batch_order_cancel(self, orders_to_cancel: List[InFlightOrder]):
+        """
+        Issues a batch order cancelation as a single API request for exchanges that implement this feature. The default
+        implementation of this method is to send the requests discretely (one by one).
+        :param orders_to_cancel: A list of trading-pair, client order ID tuples.
+        """
+        safe_ensure_future(coro=self._execute_batch_order_cancel(orders_to_cancel=orders_to_cancel))
 
     def get_fee(self,
                 base_currency: str,
@@ -386,88 +433,101 @@ class ExchangePyBase(ExchangeBase, ABC):
 
         :return: the client id of the order to cancel
         """
-        safe_ensure_future(self._execute_cancel(trading_pair, order_id))
+        safe_ensure_future(self._execute_batch_cancel(order_ids_to_cancel=[order_id]))
         return order_id
 
     async def cancel_all(self, timeout_seconds: float) -> List[CancellationResult]:
         """
-        Cancels all currently active orders. The cancellations are performed in parallel tasks.
-
+        Cancels all currently active orders.
         :param timeout_seconds: the maximum time (in seconds) the cancel logic should run
-
         :return: a list of CancellationResult instances, one for each of the orders to be cancelled
         """
-        incomplete_orders = [o for o in self.in_flight_orders.values() if not o.is_done]
-        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id) for o in incomplete_orders]
-        order_id_set = set([o.client_order_id for o in incomplete_orders])
-        successful_cancellations = []
+        order_ids_to_cancel = [
+            order.client_order_id
+            for order in self.in_flight_orders.values()
+            if not order.is_done
+        ]
 
         try:
             async with timeout(timeout_seconds):
-                cancellation_results = await safe_gather(*tasks, return_exceptions=True)
-                for cr in cancellation_results:
-                    if isinstance(cr, Exception):
-                        continue
-                    client_order_id = cr
-                    if client_order_id is not None:
-                        order_id_set.remove(client_order_id)
-                        successful_cancellations.append(CancellationResult(client_order_id, True))
+                if len(order_ids_to_cancel) != 0:
+                    cancelation_results = await self._execute_batch_cancel(order_ids_to_cancel=order_ids_to_cancel)
+                else:
+                    cancelation_results = []
         except Exception:
             self.logger().network(
                 "Unexpected error cancelling orders.",
                 exc_info=True,
                 app_warning_msg="Failed to cancel order. Check API key and network connection."
             )
-        failed_cancellations = [CancellationResult(oid, False) for oid in order_id_set]
-        return successful_cancellations + failed_cancellations
+            cancelation_results = [
+                CancellationResult(order_id=client_order_id, success=False)
+                for client_order_id in order_ids_to_cancel
+            ]
 
-    async def _create_order(self,
-                            trade_type: TradeType,
-                            order_id: str,
-                            trading_pair: str,
-                            amount: Decimal,
-                            order_type: OrderType,
-                            price: Optional[Decimal] = None,
-                            **kwargs):
-        """
-        Creates an order in the exchange using the parameters to configure it
+        return cancelation_results
 
-        :param trade_type: the side of the order (BUY of SELL)
-        :param order_id: the id that should be assigned to the order (the client id)
-        :param trading_pair: the token pair to operate with
-        :param amount: the order amount
-        :param order_type: the type of order to create (MARKET, LIMIT, LIMIT_MAKER)
-        :param price: the order price
-        """
-        order = await self._start_tracking_and_validate_order(
-            trade_type=trade_type,
-            order_id=order_id,
-            trading_pair=trading_pair,
-            amount=amount,
-            order_type=order_type,
-            price=price,
-            **kwargs
-        )
-
-        ret = None
-        if order is not None:
-            exchange_order_id = None
-            try:
-                exchange_order_id, update_timestamp = await self._place_order(
-                    order_id=order.client_order_id,
-                    trading_pair=order.trading_pair,
-                    amount=order.amount,
-                    trade_type=order.trade_type,
-                    order_type=order.order_type,
-                    price=order.price,
-                    **kwargs,
+    async def _execute_batch_order_create(self, orders_to_create: List[Order]):
+        validated_orders_to_create = []
+        in_flight_orders_to_create = []
+        for order in orders_to_create:
+            valid_order = await self._start_tracking_and_validate_order(
+                trade_type=order.trade_type,
+                order_id=order.client_order_id,
+                trading_pair=order.trading_pair,
+                amount=order.amount,
+                order_type=order.order_type,
+                price=order.price,
+                **order.kwargs
+            )
+            if valid_order is not None:
+                validated_orders_to_create.append(order)
+                in_flight_orders_to_create.append(valid_order)
+        try:
+            validated_orders_with_kwargs_to_create = list(
+                zip(in_flight_orders_to_create, [order.kwargs for order in validated_orders_to_create])
+            )
+            if len(validated_orders_with_kwargs_to_create) > 1:
+                try:
+                    place_order_results = await self._place_batch_order_create(
+                        orders_with_kwargs_to_create=validated_orders_with_kwargs_to_create
+                    )
+                except NotImplementedError:  # the exchange does not implement batch order placement
+                    place_order_results = await self._place_batch_order_create_discretely(
+                        orders_with_kwargs_to_create=validated_orders_with_kwargs_to_create
+                    )
+            else:  # default discrete calls in order to avoid higher rate limit penalties for batch operations
+                place_order_results = await self._place_batch_order_create_discretely(
+                    orders_with_kwargs_to_create=validated_orders_with_kwargs_to_create
                 )
-                self._update_order_after_creation_success(
-                    exchange_order_id=exchange_order_id, order=order, update_timestamp=update_timestamp
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as ex:
+            for place_order_result, in_flight_order in (
+                zip(place_order_results, in_flight_orders_to_create)
+            ):
+                if place_order_result.success:
+                    self._update_order_after_creation_success(
+                        exchange_order_id=place_order_result.exchange_order_id,
+                        order=in_flight_order,
+                        update_timestamp=self.current_timestamp,
+                    )
+                elif place_order_result.exception:
+                    self._on_order_creation_failure(
+                        order_id=in_flight_order.client_order_id,
+                        trading_pair=in_flight_order.trading_pair,
+                        amount=in_flight_order.amount,
+                        trade_type=in_flight_order.trade_type,
+                        order_type=in_flight_order.order_type,
+                        price=in_flight_order.price,
+                        exception=place_order_result.exception,
+                    )
+                else:
+                    self._update_order_after_creation_failure(
+                        order_id=in_flight_order.client_order_id, trading_pair=in_flight_order.trading_pair
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as ex:
+            self.logger().network("Batch order create failed.")
+            for order in orders_to_create:
                 self._on_order_creation_failure(
                     order_id=order.client_order_id,
                     trading_pair=order.trading_pair,
@@ -476,11 +536,55 @@ class ExchangePyBase(ExchangeBase, ABC):
                     order_type=order.order_type,
                     price=order.price,
                     exception=ex,
-                    **kwargs,
                 )
-            ret = order_id, exchange_order_id
 
-        return ret
+    async def _place_batch_order_create_discretely(
+        self, orders_with_kwargs_to_create: List[Tuple[InFlightOrder, Dict[str, Any]]]
+    ) -> List[PlaceOrderResult]:
+        """
+        This method is a default implementation that will issue a separate single-order creation request for each
+        of the orders in the list.
+        """
+        tasks = [
+            self._place_order(
+                order_id=order.client_order_id,
+                trading_pair=order.trading_pair,
+                amount=order.amount,
+                trade_type=order.trade_type,
+                order_type=order.order_type,
+                price=order.price,
+                **kwargs,
+            ) for order, kwargs in orders_with_kwargs_to_create
+        ]
+        creation_results: List[Union[Exception, Tuple[str, float]]] = await safe_gather(*tasks, return_exceptions=True)
+
+        place_order_results = []
+        for i, creation_result in enumerate(creation_results):
+            order = orders_with_kwargs_to_create[i][0]
+            if isinstance(creation_result, Exception):
+                place_order_results.append(
+                    PlaceOrderResult(
+                        success=False,
+                        update_timestamp=self.current_timestamp,
+                        client_order_id=order.client_order_id,
+                        exchange_order_id=None,
+                        trading_pair=order.trading_pair,
+                        exception=creation_result,
+                    )
+                )
+            else:
+                exchange_order_id, update_timestamp = creation_result
+                place_order_results.append(
+                    PlaceOrderResult(
+                        success=True,
+                        update_timestamp=update_timestamp,
+                        client_order_id=order.client_order_id,
+                        exchange_order_id=exchange_order_id,
+                        trading_pair=order.trading_pair,
+                    )
+                )
+
+        return place_order_results
 
     async def _start_tracking_and_validate_order(
         self,
@@ -571,24 +675,100 @@ class ExchangePyBase(ExchangeBase, ABC):
         )
         self._order_tracker.process_order_update(order_update)
 
-    async def _execute_order_cancel(self, order: InFlightOrder) -> str:
+    async def _execute_batch_cancel(self, order_ids_to_cancel: List[str]) -> List[CancellationResult]:
+        results = []
+        tracked_orders_to_cancel = []
+
+        for order_id in order_ids_to_cancel:
+            tracked_order = self._order_tracker.fetch_tracked_order(client_order_id=order_id)
+            if tracked_order is not None:
+                tracked_orders_to_cancel.append(tracked_order)
+            else:
+                results.append(CancellationResult(order_id=order_id, success=False))
+
+        results.extend(await self._execute_batch_order_cancel(orders_to_cancel=tracked_orders_to_cancel))
+
+        return results
+
+    async def _execute_batch_order_cancel(self, orders_to_cancel: List[InFlightOrder]) -> List[CancellationResult]:
         try:
-            cancelled = await self._place_cancel(order.client_order_id, order)
-            if cancelled:
-                self._update_order_after_cancelation_success(order=order)
-            if cancelled:
-                return order.client_order_id
+            if len(orders_to_cancel) > 1:
+                try:
+                    cancel_order_results = await self._place_batch_order_cancel(orders_to_cancel=orders_to_cancel)
+                except NotImplementedError:  # the exchange does not implement batch order placement
+                    cancel_order_results = await self._place_batch_order_cancel_discretely(
+                        orders_to_cancel=orders_to_cancel
+                    )
+            else:  # default to discrete calls in order to avoid higher rate limit penalties for batch operations
+                cancel_order_results = await self._place_batch_order_cancel_discretely(
+                    orders_to_cancel=orders_to_cancel
+                )
+            cancelation_results = [
+                CancellationResult(order_id=cancel_order_result.client_order_id, success=cancel_order_result.success)
+                for cancel_order_result in cancel_order_results
+            ]
+            for cancel_order_result in cancel_order_results:
+                if cancel_order_result.success:
+                    order_update: OrderUpdate = OrderUpdate(
+                        client_order_id=cancel_order_result.client_order_id,
+                        trading_pair=cancel_order_result.trading_pair,
+                        update_timestamp=self.current_timestamp,
+                        new_state=(OrderState.CANCELED
+                                   if self.is_cancel_request_in_exchange_synchronous
+                                   else OrderState.PENDING_CANCEL),
+                    )
+                    self._order_tracker.process_order_update(order_update)
+                elif cancel_order_result.not_found:
+                    self.logger().warning(
+                        f"Failed to cancel the order {cancel_order_result.client_order_id} due to the order"
+                        f" not being found."
+                    )
+                    await self._order_tracker.process_order_not_found(
+                        client_order_id=cancel_order_result.client_order_id
+                    )
+                elif cancel_order_result.exception is not None:
+                    self.logger().error(
+                        f"Failed to cancel order {cancel_order_result.client_order_id}",
+                        exc_info=cancel_order_result.exception,
+                    )
         except asyncio.CancelledError:
             raise
-        except asyncio.TimeoutError:
-            # Binance does not allow cancels with the client/user order id
-            # so log a warning and wait for the creation of the order to complete
-            self.logger().warning(
-                f"Failed to cancel the order {order.client_order_id} because it does not have an exchange order id yet")
-            await self._order_tracker.process_order_not_found(order.client_order_id)
         except Exception:
             self.logger().error(
-                f"Failed to cancel order {order.client_order_id}", exc_info=True)
+                f"Failed to cancel orders {', '.join([o.client_order_id for o in orders_to_cancel])}",
+                exc_info=True,
+            )
+            cancelation_results = [
+                CancellationResult(order_id=order.client_order_id, success=False)
+                for order in orders_to_cancel
+            ]
+
+        return cancelation_results
+
+    async def _place_batch_order_cancel_discretely(
+        self, orders_to_cancel: List[InFlightOrder]
+    ) -> List[CancelOrderResult]:
+        """
+        This method is a default implementation that will issue a separate single-order cancelation request for each
+        of the orders in the list.
+        """
+        tasks = [
+            self._place_cancel(order_id=order.client_order_id, tracked_order=order)
+            for order in orders_to_cancel
+        ]
+        cancelation_results: List[Union[Exception, bool]] = await safe_gather(*tasks, return_exceptions=True)
+
+        cancel_order_results = [
+            CancelOrderResult(
+                success=result if not isinstance(result, Exception) else False,
+                client_order_id=order.client_order_id,
+                trading_pair=order.trading_pair,
+                exception=result if isinstance(result, Exception) else None,
+                not_found=isinstance(result, asyncio.TimeoutError),
+            ) for result, order in zip(cancelation_results, orders_to_cancel)
+        ]
+
+        return cancel_order_results
 
     def _update_order_after_cancelation_success(self, order: InFlightOrder):
         order_update: OrderUpdate = OrderUpdate(
@@ -600,20 +780,6 @@ class ExchangePyBase(ExchangeBase, ABC):
                        else OrderState.PENDING_CANCEL),
         )
         self._order_tracker.process_order_update(order_update)
-
-    async def _execute_cancel(self, trading_pair: str, order_id: str) -> str:
-        """
-        Requests the exchange to cancel an active order
-
-        :param trading_pair: the trading pair the order to cancel operates with
-        :param order_id: the client id of the order to cancel
-        """
-        result = None
-        tracked_order = self._order_tracker.fetch_tracked_order(order_id)
-        if tracked_order is not None:
-            result = await self._execute_order_cancel(order=tracked_order)
-
-        return result
 
     # === Order Tracking ===
 
@@ -1044,8 +1210,9 @@ class ExchangePyBase(ExchangeBase, ABC):
         await self._update_lost_orders()
 
     async def _cancel_lost_orders(self):
-        for _, lost_order in self._order_tracker.lost_orders.items():
-            await self._execute_order_cancel(order=lost_order)
+        orders_to_cancel = list(self._order_tracker.lost_orders.values())
+        if len(orders_to_cancel) != 0:
+            await self._execute_batch_order_cancel(orders_to_cancel=orders_to_cancel)
 
     # Methods tied to specific API data formats
     #

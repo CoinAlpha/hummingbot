@@ -424,8 +424,8 @@ class BinanceExchangeTests(AbstractExchangeConnectorTests.ExchangeConnectorTests
         self.assertEqual(self.exchange_symbol_for_tokens(self.base_asset, self.quote_asset), request_data["symbol"])
         self.assertEqual(order.trade_type.name.upper(), request_data["side"])
         self.assertEqual(BinanceExchange.binance_order_type(OrderType.LIMIT), request_data["type"])
-        self.assertEqual(Decimal("100"), Decimal(request_data["quantity"]))
-        self.assertEqual(Decimal("10000"), Decimal(request_data["price"]))
+        self.assertEqual(order.amount, Decimal(request_data["quantity"]))
+        self.assertEqual(order.price, Decimal(request_data["price"]))
         self.assertEqual(order.client_order_id, request_data["newClientOrderId"])
 
     def validate_order_cancelation_request(self, order: InFlightOrder, request_call: RequestCall):

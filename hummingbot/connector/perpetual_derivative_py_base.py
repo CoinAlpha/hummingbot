@@ -10,7 +10,7 @@ from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.perpetual_trading import PerpetualTrading
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, TradeType
 from hummingbot.core.data_type.funding_info import FundingInfo
-from hummingbot.core.data_type.in_flight_order import PerpetualDerivativeInFlightOrder
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, PerpetualDerivativeInFlightOrder
 from hummingbot.core.data_type.perpetual_api_order_book_data_source import PerpetualAPIOrderBookDataSource
 from hummingbot.core.data_type.trade_fee import TradeFeeBase
 from hummingbot.core.event.events import (
@@ -211,7 +211,7 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         self._last_funding_fee_payment_ts.clear()
         super()._stop_network()
 
-    async def _create_order(
+    async def _start_tracking_and_validate_order(
         self,
         trade_type: TradeType,
         order_id: str,
@@ -220,35 +220,25 @@ class PerpetualDerivativePyBase(ExchangePyBase, ABC):
         order_type: OrderType,
         price: Optional[Decimal] = None,
         position_action: PositionAction = PositionAction.NIL,
-        **kwargs,
-    ):
-        """
-        Creates an order in the exchange using the parameters to configure it
-
-        :param trade_type: the side of the order (BUY of SELL)
-        :param order_id: the id that should be assigned to the order (the client id)
-        :param trading_pair: the token pair to operate with
-        :param amount: the order amount
-        :param order_type: the type of order to create (MARKET, LIMIT, LIMIT_MAKER)
-        :param price: the order price
-        :param position_action: is the order opening or closing a position
-        """
-
+        **kwargs
+    ) -> Optional[InFlightOrder]:
         if position_action not in self.VALID_POSITION_ACTIONS:
-            raise ValueError(
+            self.logger().error(
                 f"Invalid position action {position_action}. Must be one of {self.VALID_POSITION_ACTIONS}"
             )
-
-        await super()._create_order(
-            trade_type,
-            order_id,
-            trading_pair,
-            amount,
-            order_type,
-            price,
-            position_action=position_action,
-            **kwargs,
-        )
+            order = None
+        else:
+            order = await super()._start_tracking_and_validate_order(
+                trade_type=trade_type,
+                order_id=order_id,
+                trading_pair=trading_pair,
+                amount=amount,
+                order_type=order_type,
+                price=price,
+                position_action=position_action,
+                **kwargs
+            )
+        return order
 
     def get_fee(
         self,
