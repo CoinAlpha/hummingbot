@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Optional
 
-from hummingbot.client.config.config_data_types import BaseStrategyConfigMap
 from hummingbot.client.config.config_helpers import (
     ClientConfigAdapter,
     ConfigValidationError,
@@ -20,12 +19,13 @@ from hummingbot.client.config.config_helpers import (
     save_to_yml_legacy,
 )
 from hummingbot.client.config.config_var import ConfigVar
+from hummingbot.client.config.strategy_config_data_types import BaseStrategyConfigMap
 from hummingbot.client.settings import STRATEGIES_CONF_DIR_PATH, required_exchanges
 from hummingbot.client.ui.completer import load_completer
 from hummingbot.core.utils.async_utils import safe_ensure_future
 
 if TYPE_CHECKING:
-    from hummingbot.client.hummingbot_application import HummingbotApplication
+    from hummingbot.client.hummingbot_application import HummingbotApplication  # noqa: F401
 
 
 class CreateCommand:
@@ -161,8 +161,7 @@ class CreateCommand:
             prompt = await model.get_client_prompt(config)
             if prompt is not None:
                 if assign_default:
-                    default = model.get_default(config)
-                    default = str(default) if default is not None else ""
+                    default = model.get_default_str_repr(attr_name=config)
                     self.app.set_text(default)
                 prompt = f"{prompt} >>> "
                 client_data = model.get_client_data(config)

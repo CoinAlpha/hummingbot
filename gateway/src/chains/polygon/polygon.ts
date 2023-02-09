@@ -76,7 +76,7 @@ export class Polygon extends EthereumBase implements Ethereumish {
     } else if (reqSpender === 'quickswap') {
       spender = QuickswapConfig.config.routerAddress(this._chain);
     } else if (reqSpender === 'sushiswap') {
-      spender = SushiswapConfig.config.sushiswapRouterAddress('polygon', this._chain);
+      spender = SushiswapConfig.config.sushiswapRouterAddress('polygon');
     } else {
       spender = reqSpender;
     }

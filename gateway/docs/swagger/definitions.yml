@@ -566,7 +566,7 @@ definitions:
           - type: 'boolean'
           - type: 'number'
 
-  SolanaConfigResponse:
+  CosmosConfigResponse:
     type: 'object'
     required:
       - 'network'
@@ -576,10 +576,10 @@ definitions:
     properties:
       network:
         type: 'string'
-        example: 'mainnet-beta'
+        example: 'mainnet'
       rpcUrl:
         type: 'string'
-        example: 'https://api.mainnet-beta.solana.com'
+        example: 'https://rpc.cosmos.network/'
       connection:
         type: 'boolean'
         example: true
@@ -587,7 +587,7 @@ definitions:
         type: 'integer'
         example: 1641889489132
 
-  SolanaBalanceRequest:
+  CosmosBalanceRequest:
     type: 'object'
     required:
       - 'address'
@@ -595,178 +595,36 @@ definitions:
     properties:
       address:
         type: 'string'
-        example: '3xgEFpNpz1hPU7iHN9P3WPgLTWfZXu6wSUuGw8kigNQr'
+        example: 'cosmos1pc8m5m7n0z8xe7sx2tawkvc0v6qkjql83js0dr'
       tokenSymbols:
         type: 'array'
         items: 'string'
-        example: ['SOL', 'RAY', 'MNGO']
+        example: ['ATOM', 'NETA']
 
-  SolanaBalanceResponse:
-    type: 'object'
-    required:
-      - 'network'
-      - 'timestamp'
-      - 'latency'
-      - 'balances'
-    properties:
-      network:
-        type: 'string'
-        example: 'mainnet-beta'
-      timestamp:
-        type: 'integer'
-        example: 1641889944387
-      latency:
-        type: 'number'
-        example: 0.374
-      balances:
-        type: 'object'
-        properties:
-          id:
-            type: 'string'
-          name:
-            type: 'string'
-        example: '{"SOL": "1.5", "RAY": "100", "MNGO": "3000"}'
-
-  SolanaTokenRequest:
-    type: 'object'
-    required:
-      - 'address'
-      - 'token'
-    properties:
-      address:
-        type: 'string'
-        example: 'oaMWkrYr1g9JBcDUPRqz21cJBxowM4CEbDy2FsCgNK569CjZSr4wa51d4k9DpTRJU8GUHfp3e9YX2pGXaBS5Tta'
-      token:
-        type: 'string'
-        example: 'MNGO'
-
-  SolanaTokenResponse:
-    type: 'object'
-    required:
-      - 'network'
-      - 'timestamp'
-      - 'token'
-      - 'mintAddress'
-    properties:
-      network:
-        type: 'string'
-        example: 'mainnet-beta'
-      timestamp:
-        type: 'integer'
-        example: 1636368085740
-      token:
-        type: 'string'
-        example: 'MNGO'
-      mintAddress:
-        type: 'string'
-        example: 'MangoCzJ36AjZyKwVj3VnYU4GTonjfVEnJmvvWaxLac'
-      accountAddress:
-        type: 'string'
-        example: 'GizuDGzHpZFFJTjRKG57LFmzb5AooBiceugbmDPgsb5T'
-      amount:
-        type: 'string'
-        example: '3000.000451'
-
-  SolanaPollRequest:
+  CosmosPollRequest:
     type: 'object'
     required:
       - 'txHash'
     properties:
       txHash:
         type: 'string'
-        example: 'oaMWkrYr1g9JBcDUPRqz21cJBxowM4CEbDy2FsCgNK569CjZSr4wa51d4k9DpTRJU8GUHfp3e9YX2pGXaBS5Tta'
+        example: 'E0E02A6C27A75F4442B0746676BDAF5F66AFF1E71928C54624A35B48D5A4B3AF'
 
-  SolanaTransaction:
-    type: 'object'
-    required:
-      - 'slot'
-      - 'transaction'
-      - 'meta'
-    properties:
-      slot:
-        type: 'integer'
-        example: 112646487
-      transaction:
-        type: 'object'
-        example: '
-        {
-          "message": {
-            "accountKeys": [
-              "3UVYmECPPMZSCqWKfENfuoTv51fTDTWicX9xmBD2euKe",
-              "AjozzgE83A3x1sHNUR64hfH7zaEBWeMaFuAN9kQgujrc",
-              "SysvarS1otHashes111111111111111111111111111",
-              "SysvarC1ock11111111111111111111111111111111",
-              "Vote111111111111111111111111111111111111111"
-            ],
-            "header": {
-              "numReadonlySignedAccounts": 0,
-              "numReadonlyUnsignedAccounts": 3,
-              "numRequiredSignatures": 1
-            },
-            "instructions": [
-              {
-                "accounts": [
-                  1,
-                  2,
-                  3,
-                  0
-                ],
-                "data": "37u9WtQpcm6ULa3WRQHmj49EPs4if7o9f1jSRVZpm2dvihR9C8jY4NqEwXUbLwx15HBSNcP1",
-                "programIdIndex": 4
-              }
-            ],
-            "recentBlockhash": "mfcyqEXB3DnHXki6KjjmZck6YjmZLvpAByy2fj4nh6B"
-          },
-          "signatures": [
-            "2nBhEBYYvfaAe16UMNqRHre4YNSskvuYgx3M6E4JP1oDYvZEJHvoPzyUidNgNX5r9sTyN1J9UxtbCXy2rqYcuyuv"
-          ]
-        }'
-      meta:
-        type: 'object'
-        example: '
-        {
-          "err": null,
-          "fee": 5000,
-          "innerInstructions": [],
-          "postBalances": [
-            499998932500,
-            26858640,
-            1,
-            1,
-            1
-          ],
-          "postTokenBalances": [],
-          "preBalances": [
-            499998937500,
-            26858640,
-            1,
-            1,
-            1
-          ],
-          "preTokenBalances": [],
-          "status": {
-            "Ok": null
-          }
-        }'
-      blockTime:
-        type: 'integer'
-        example: 1641891662
-
-  SolanaPollResponse:
+  CosmosPollResponse:
     type: 'object'
     required:
       - 'network'
       - 'timestamp'
-      - 'currentBlock'
       - 'txHash'
-      - 'txStatus'
+      - 'currentBlock'
       - 'txBlock'
+      - 'gasUsed'
+      - 'gasWanted'
       - 'txData'
-      - 'txReceipt'
     properties:
       network:
         type: 'string'
-        example: 'mainnet-beta'
+        example: 'mainnet'
       timestamp:
         type: 'integer'
         example: 1636368085740
@@ -776,11 +634,17 @@ definitions:
       txHash:
         type: 'string'
         example: 'oaMWkrYr1g9JBcDUPRqz21cJBxowM4CEbDy2FsCgNK569CjZSr4wa51d4k9DpTRJU8GUHfp3e9YX2pGXaBS5Tta'
-      txStatus:
+      txBlock:
         type: 'number'
-        example: 1
+        example: 11581899
+      gasUsed:
+        type: 'number'
+        example: 89054
+      gasWanted:
+        type: 'number'
+        example: 130000
       txData:
-        $ref: '#/definitions/SolanaTransaction'
+        $ref: '#/definitions/CosmosTransaction'
 
   TokensResponse:
     type: 'object'
@@ -856,7 +720,6 @@ definitions:
       gasCost:
         type: 'string'
         example: '0.014466048000000000'
-
 
   LiquidityAddRequest:
     type: 'object'
@@ -1617,4 +1480,101 @@ definitions:
         type: 'string'
       txHash:
         type: 'string'
+
+  NearBalancesRequest:
+    type: 'object'
+    required:
+      - 'address'
+      - 'tokenSymbols'
+      - 'chain'
+      - 'network'
+    properties:
+      privateKey:
+        type: 'string'
+        example: 'hummingbot.near'
+      tokenSymbols:
+        type: 'array'
+        items: 'string'
+        example: ["NEAR", "ETH", "AURORA"]
+      chain:
+        type: 'string'
+        example: 'near'
+      network:
+        type: 'string'
+        example: 'testnet'
+
+  NearBalancesResponse:
+    type: 'object'
+    required:
+      - 'network'
+      - 'timestamp'
+      - 'latency'
+      - 'balances'
+    properties:
+      network:
+        type: 'string'
+        example: 'testnet'
+      timestamp:
+        type: 'integer'
+        example: 1636368085740
+      latency:
+        type: 'number'
+        example: 0.5
+      balances:
+        type: 'object'
+        properties:
+          id:
+            type: 'string'
+          name:
+            type: 'string'
+        example: '{"NEAR": "1.5", "ETH": "100", "AURORA": "300"}'
+
+  NearPollRequest:
+    type: 'object'
+    required:
+      - 'address'
+      - 'txHash'
+      - 'chain'
+      - 'network'
+    properties:
+      address:
+        type: 'string'
+        example: 'hummingbot.near'
+      txHash:
+        type: 'string'
+        example: 'HnpRwb8PjrtLjExxz4YxdiyJ2AwuRFhZHKa9WUASwyxk'
+      chain:
+        type: 'string'
+        example: 'near'
+      network:
+        type: 'string'
+        example: 'testnet'
+
+  NearPollResponse:
+    type: 'object'
+    required:
+      - 'network'
+      - 'timestamp'
+      - 'currentBlock'
+      - 'txHash'
+      - 'txStatus'
+      - 'txReceipt'
+    properties:
+      network:
+        type: 'string'
+        example: 'testnet'
+      timestamp:
+        type: 'integer'
+        example: 1636368085740
+      currentBlock:
+        type: 'integer'
+        example: 28243911
+      txHash:
+        type: 'string'
+        example: 'HnpRwb8PjrtLjExxz4YxdiyJ2AwuRFhZHKa9WUASwyxk'
+      txStatus:
+        type: 'number'
+        example: 1
+      txReceipt:
+        type: 'object'
 

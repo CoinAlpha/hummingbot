@@ -23,18 +23,13 @@ export const validateSpender: Validator = mkValidator(
   (val) => typeof val === 'string' && (val === 'xdcswap' || isAddress(val))
 );
 
-export const validateXdcApproveRequest: RequestValidator =
-  mkRequestValidator([
-    validateAddress,
-    validateSpender,
-    validateToken,
-    validateAmount,
-    validateNonce,
-  ]);
+export const validateXdcApproveRequest: RequestValidator = mkRequestValidator([
+  validateAddress,
+  validateSpender,
+  validateToken,
+  validateAmount,
+  validateNonce,
+]);
 
 export const validateXdcAllowancesRequest: RequestValidator =
-  mkRequestValidator([
-    validateAddress,
-    validateSpender,
-    validateTokenSymbols
-  ]);
+  mkRequestValidator([validateAddress, validateSpender, validateTokenSymbols]);

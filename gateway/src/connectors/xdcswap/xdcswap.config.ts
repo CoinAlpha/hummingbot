@@ -12,10 +12,17 @@ export namespace XdcswapConfig {
   }
 
   export const config: NetworkConfig = {
-    allowedSlippage: ConfigManagerV2.getInstance().get('xdcswap.allowedSlippage'),
-    gasLimitEstimate: ConfigManagerV2.getInstance().get('xdcswap.gasLimitEstimate'),
+    allowedSlippage: ConfigManagerV2.getInstance().get(
+      'xdcswap.allowedSlippage'
+    ),
+    gasLimitEstimate: ConfigManagerV2.getInstance().get(
+      'xdcswap.gasLimitEstimate'
+    ),
     ttl: ConfigManagerV2.getInstance().get('xdcswap.ttl'),
-    routerAddress: (network: string) => ConfigManagerV2.getInstance().get('xdcswap.contractAddresses.' + network + '.routerAddress'),
+    routerAddress: (network: string) =>
+      ConfigManagerV2.getInstance().get(
+        'xdcswap.contractAddresses.' + network + '.routerAddress'
+      ),
     tradingTypes: ['EVM_AMM'],
     availableNetworks: [{ chain: 'xdc', networks: ['xinfin', 'apothem'] }],
   };

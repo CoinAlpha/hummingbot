@@ -1,8 +1,16 @@
 /* eslint-disable @typescript-eslint/ban-types */
-import { NextFunction, Router, Request, Response } from 'express';
-import { asyncHandler } from '../services/error-handler';
-import { balances, poll } from '../chains/ethereum/ethereum.controllers';
+import { NextFunction, Request, Response, Router } from 'express';
+import * as ethereumControllers from '../chains/ethereum/ethereum.controllers';
+import { Ethereumish } from '../services/common-interfaces';
+import { ConfigManagerV2 } from '../services/config-manager-v2';
 import { getChain } from '../services/connection-manager';
+import { asyncHandler } from '../services/error-handler';
+import {
+  mkRequestValidator,
+  RequestValidator,
+  validateTxHash,
+} from '../services/validators';
+import { getStatus, getTokens } from './network.controllers';
 import {
   BalanceRequest,
   BalanceResponse,
@@ -14,25 +22,18 @@ import {
   TokensResponse,
 } from './network.requests';
 import {
-  validateNetwork,
-  validateChain,
-  validateBalanceRequest,
+  validateBalanceRequest as validateEthereumBalanceRequest,
+  validateChain as validateEthereumChain,
+  validateNetwork as validateEthereumNetwork,
 } from '../chains/ethereum/ethereum.validators';
-import { getStatus, getTokens } from './network.controllers';
-import { ConfigManagerV2 } from '../services/config-manager-v2';
-import {
-  mkRequestValidator,
-  RequestValidator,
-  validateTxHash,
-} from '../services/validators';
 
 export const validatePollRequest: RequestValidator = mkRequestValidator([
   validateTxHash,
 ]);
 
 export const validateTokensRequest: RequestValidator = mkRequestValidator([
-  validateChain,
-  validateNetwork,
+  validateEthereumChain,
+  validateEthereumNetwork,
 ]);
 
 export namespace NetworkRoutes {
@@ -62,9 +63,15 @@ export namespace NetworkRoutes {
         res: Response<BalanceResponse | string, {}>,
         _next: NextFunction
       ) => {
-        validateBalanceRequest(req.body);
-        const chain = await getChain(req.body.chain, req.body.network);
-        res.status(200).json(await balances(chain, req.body));
+        validateEthereumBalanceRequest(req.body);
+        const chain = await getChain<Ethereumish>(
+          req.body.chain,
+          req.body.network
+        );
+
+        res
+          .status(200)
+          .json(await ethereumControllers.balances(chain, req.body));
       }
     )
   );
@@ -77,8 +84,13 @@ export namespace NetworkRoutes {
         res: Response<PollResponse, {}>
       ) => {
         validatePollRequest(req.body);
-        const chain = await getChain(req.body.chain, req.body.network);
-        res.status(200).json(await poll(chain, req.body));
+
+        const chain = await getChain<Ethereumish>(
+          req.body.chain,
+          req.body.network
+        );
+
+        res.status(200).json(await ethereumControllers.poll(chain, req.body));
       }
     )
   );

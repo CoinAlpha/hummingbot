@@ -1,9 +1,11 @@
 import fse from 'fs-extra';
 import { Avalanche } from '../../chains/avalanche/avalanche';
+import { BinanceSmartChain } from '../../chains/binance-smart-chain/binance-smart-chain';
+import { Cronos } from '../../chains/cronos/cronos';
 import { Ethereum } from '../../chains/ethereum/ethereum';
 import { Polygon } from '../../chains/polygon/polygon';
 import { Xdc } from '../../chains/xdc/xdc';
-import { Solana } from '../../chains/solana/solana';
+import { Cosmos } from '../../chains/cosmos/cosmos';
 import { Harmony } from '../../chains/harmony/harmony';
 
 import {
@@ -16,17 +18,20 @@ import {
 import { ConfigManagerCertPassphrase } from '../config-manager-cert-passphrase';
 
 import {
+  ERROR_RETRIEVING_WALLET_ADDRESS_ERROR_CODE,
+  ERROR_RETRIEVING_WALLET_ADDRESS_ERROR_MESSAGE,
+  ACCOUNT_NOT_SPECIFIED_CODE,
+  ACCOUNT_NOT_SPECIFIED_ERROR_MESSAGE,
   HttpException,
   UNKNOWN_CHAIN_ERROR_CODE,
   UNKNOWN_KNOWN_CHAIN_ERROR_MESSAGE,
 } from '../error-handler';
-
-import { convertXdcPrivateKey } from '../../helpers';
+import { EthereumBase } from '../ethereum-base';
+import { Near } from '../../chains/near/near';
+// TODO: fix XDC things
+// import { convertXdcPrivateKey } from '../../helpers';
 
 const walletPath = './conf/wallets';
-
-const solana = Solana.getInstance();
-
 export async function mkdirIfDoesNotExist(path: string): Promise<void> {
   const exists = await fse.pathExists(path);
   if (!exists) {
@@ -41,34 +46,38 @@ export async function addWallet(
   if (!passphrase) {
     throw new Error('There is no passphrase');
   }
-  let address: string;
-  let encryptedPrivateKey: string;
+  let connection: EthereumBase | Near | Cosmos | Xdc;
+  let address: string | undefined;
+  let encryptedPrivateKey: string | undefined;
+
   if (req.chain === 'ethereum') {
-    const ethereum = Ethereum.getInstance(req.network);
-    address = ethereum.getWalletFromPrivateKey(req.privateKey).address;
-    encryptedPrivateKey = await ethereum.encrypt(req.privateKey, passphrase);
+    connection = Ethereum.getInstance(req.network);
   } else if (req.chain === 'avalanche') {
-    const avalanche = Avalanche.getInstance(req.network);
-    address = avalanche.getWalletFromPrivateKey(req.privateKey).address;
-    encryptedPrivateKey = await avalanche.encrypt(req.privateKey, passphrase);
+    connection = Avalanche.getInstance(req.network);
   } else if (req.chain === 'polygon') {
-    const polygon = Polygon.getInstance(req.network);
-    address = polygon.getWalletFromPrivateKey(req.privateKey).address;
-    encryptedPrivateKey = await polygon.encrypt(req.privateKey, passphrase);
-  } else if (req.chain === 'xdc') {
-    const xdc = Xdc.getInstance(req.network);
-    const privateKey = convertXdcPrivateKey(req.privateKey);
-    address = xdc.getWalletFromPrivateKey(privateKey).address;
-    encryptedPrivateKey = await xdc.encrypt(privateKey, passphrase);
-  } else if (req.chain === 'solana') {
-    address = solana
-      .getKeypairFromPrivateKey(req.privateKey)
-      .publicKey.toBase58();
-    encryptedPrivateKey = await solana.encrypt(req.privateKey, passphrase);
+    connection = Polygon.getInstance(req.network);
   } else if (req.chain === 'harmony') {
-    const harmony = Harmony.getInstance(req.network);
-    address = harmony.getWalletFromPrivateKey(req.privateKey).address;
-    encryptedPrivateKey = await harmony.encrypt(req.privateKey, passphrase);
+    connection = Harmony.getInstance(req.network);
+  } else if (req.chain === 'cronos') {
+    connection = Cronos.getInstance(req.network);
+  } else if (req.chain === 'cosmos') {
+    connection = Cosmos.getInstance(req.network);
+  } else if (req.chain === 'near') {
+    if (!('address' in req))
+      throw new HttpException(
+        500,
+        ACCOUNT_NOT_SPECIFIED_ERROR_MESSAGE(),
+        ACCOUNT_NOT_SPECIFIED_CODE
+      );
+    connection = Near.getInstance(req.network);
+  } else if (req.chain === 'binance-smart-chain') {
+    connection = BinanceSmartChain.getInstance(req.network);
+  } else if (req.chain === 'xdc') {
+    connection = Xdc.getInstance(req.network);
+    // const xdc = Xdc.getInstance(req.network);
+    // const privateKey = convertXdcPrivateKey(req.privateKey);
+    // address = xdc.getWalletFromPrivateKey(privateKey).address;
+    // encryptedPrivateKey = await xdc.encrypt(privateKey, passphrase);
   } else {
     throw new HttpException(
       500,
@@ -77,6 +86,51 @@ export async function addWallet(
     );
   }
 
+  if (!connection.ready()) {
+    await connection.init();
+  }
+
+  try {
+    if (connection instanceof EthereumBase) {
+      address = connection.getWalletFromPrivateKey(req.privateKey).address;
+      encryptedPrivateKey = await connection.encrypt(
+        req.privateKey,
+        passphrase
+      );
+    } else if (connection instanceof Cosmos) {
+      const wallet = await connection.getAccountsfromPrivateKey(
+        req.privateKey,
+        'cosmos'
+      );
+      address = wallet.address;
+      encryptedPrivateKey = await connection.encrypt(
+        req.privateKey,
+        passphrase
+      );
+    } else if (connection instanceof Near) {
+      address = (
+        await connection.getWalletFromPrivateKey(
+          req.privateKey,
+          <string>req.address
+        )
+      ).accountId;
+      encryptedPrivateKey = connection.encrypt(req.privateKey, passphrase);
+    } //  else if (connection instanceof Xdc) {
+    //   const privateKey = convertXdcPrivateKey(req.privateKey);
+    //   address = connection.getWalletFromPrivateKey(privateKey).address;
+    //   encryptedPrivateKey = await connection.encrypt(privateKey, passphrase);
+    // }
+
+    if (address === undefined || encryptedPrivateKey === undefined) {
+      throw new Error('ERROR_RETRIEVING_WALLET_ADDRESS_ERROR_CODE');
+    }
+  } catch (_e: unknown) {
+    throw new HttpException(
+      500,
+      ERROR_RETRIEVING_WALLET_ADDRESS_ERROR_MESSAGE(req.privateKey),
+      ERROR_RETRIEVING_WALLET_ADDRESS_ERROR_CODE
+    );
+  }
   const path = `${walletPath}/${req.chain}`;
   await mkdirIfDoesNotExist(path);
   await fse.writeFile(`${path}/${address}.json`, encryptedPrivateKey);

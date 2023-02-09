@@ -1,10 +1,24 @@
 import { percentRegexp } from '../../services/config-manager-v2';
 import { UniswapishPriceError } from '../../services/error-handler';
-import { BigNumber, Contract, ContractInterface, Transaction, Wallet } from 'ethers';
+import {
+  BigNumber,
+  Contract,
+  ContractInterface,
+  Transaction,
+  Wallet,
+} from 'ethers';
 import { isFractionString } from '../../services/validators';
 import { XdcswapConfig } from './xdcswap.config';
 import routerAbi from './xdcswap_v2_router_abi.json';
-import { Fetcher, Percent, Router, Token, TokenAmount, Trade, Pair } from 'xdcswap-sdk';
+import {
+  Fetcher,
+  Percent,
+  Router,
+  Token,
+  TokenAmount,
+  Trade,
+  Pair,
+} from 'xdcswap-sdk';
 import { logger } from '../../services/logger';
 import { Xdc } from '../../chains/xdc/xdc';
 import { ExpectedTrade, Uniswapish } from '../../services/common-interfaces';
@@ -56,7 +70,13 @@ export class Xdcswap implements Uniswapish {
       await this.xdc.init();
     }
     for (const token of this.xdc.storedTokenList) {
-      this.tokenList[token.address] = new Token(this.chainId, token.address, token.decimals, token.symbol, token.name);
+      this.tokenList[token.address] = new Token(
+        this.chainId,
+        token.address,
+        token.decimals,
+        token.symbol,
+        token.name
+      );
     }
     this._ready = true;
   }
@@ -108,7 +128,9 @@ export class Xdcswap implements Uniswapish {
     const allowedSlippage = XdcswapConfig.config.allowedSlippage;
     const nd = allowedSlippage.match(percentRegexp);
     if (nd) return new Percent(nd[1], nd[2]);
-    throw new Error('Encountered a malformed percent string in the config for ALLOWED_SLIPPAGE.');
+    throw new Error(
+      'Encountered a malformed percent string in the config for ALLOWED_SLIPPAGE.'
+    );
   }
 
   /**
@@ -121,16 +143,41 @@ export class Xdcswap implements Uniswapish {
    * @param quoteToken Output from the transaction
    * @param amount Amount of `baseToken` to put into the transaction
    */
-  async estimateSellTrade(baseToken: Token, quoteToken: Token, amount: BigNumber, allowedSlippage?: string): Promise<ExpectedTrade> {
-    const nativeTokenAmount: TokenAmount = new TokenAmount(baseToken, amount.toString());
-    logger.info(`Fetching pair data for ${baseToken.address}-${quoteToken.address}.`);
-    const pair: Pair = await Fetcher.fetchPairData(baseToken, quoteToken, this.xdc.provider);
-    const trades: Trade[] = Trade.bestTradeExactIn([pair], nativeTokenAmount, quoteToken, { maxHops: 1 });
+  async estimateSellTrade(
+    baseToken: Token,
+    quoteToken: Token,
+    amount: BigNumber,
+    allowedSlippage?: string
+  ): Promise<ExpectedTrade> {
+    const nativeTokenAmount: TokenAmount = new TokenAmount(
+      baseToken,
+      amount.toString()
+    );
+    logger.info(
+      `Fetching pair data for ${baseToken.address}-${quoteToken.address}.`
+    );
+    const pair: Pair = await Fetcher.fetchPairData(
+      baseToken,
+      quoteToken,
+      this.xdc.provider
+    );
+    const trades: Trade[] = Trade.bestTradeExactIn(
+      [pair],
+      nativeTokenAmount,
+      quoteToken,
+      { maxHops: 1 }
+    );
     if (!trades || trades.length === 0) {
-      throw new UniswapishPriceError(`priceSwapIn: no trade pair found for ${baseToken} to ${quoteToken}.`);
+      throw new UniswapishPriceError(
+        `priceSwapIn: no trade pair found for ${baseToken} to ${quoteToken}.`
+      );
     }
-    logger.info(`Best trade for ${baseToken.address}-${quoteToken.address}: ${trades[0]}`);
-    const expectedAmount = trades[0].minimumAmountOut(this.getAllowedSlippage(allowedSlippage));
+    logger.info(
+      `Best trade for ${baseToken.address}-${quoteToken.address}: ${trades[0]}`
+    );
+    const expectedAmount = trades[0].minimumAmountOut(
+      this.getAllowedSlippage(allowedSlippage)
+    );
     return { trade: trades[0], expectedAmount };
   }
 
@@ -144,17 +191,42 @@ export class Xdcswap implements Uniswapish {
    * @param baseToken Token output from the transaction
    * @param amount Amount of `baseToken` desired from the transaction
    */
-  async estimateBuyTrade(quoteToken: Token, baseToken: Token, amount: BigNumber, allowedSlippage?: string): Promise<ExpectedTrade> {
-    const nativeTokenAmount: TokenAmount = new TokenAmount(baseToken, amount.toString());
-    logger.info(`Fetching pair data for ${quoteToken.address}-${baseToken.address}.`);
-    const pair: Pair = await Fetcher.fetchPairData(quoteToken, baseToken, this.xdc.provider);
-    const trades: Trade[] = Trade.bestTradeExactOut([pair], quoteToken, nativeTokenAmount, { maxHops: 1 });
+  async estimateBuyTrade(
+    quoteToken: Token,
+    baseToken: Token,
+    amount: BigNumber,
+    allowedSlippage?: string
+  ): Promise<ExpectedTrade> {
+    const nativeTokenAmount: TokenAmount = new TokenAmount(
+      baseToken,
+      amount.toString()
+    );
+    logger.info(
+      `Fetching pair data for ${quoteToken.address}-${baseToken.address}.`
+    );
+    const pair: Pair = await Fetcher.fetchPairData(
+      quoteToken,
+      baseToken,
+      this.xdc.provider
+    );
+    const trades: Trade[] = Trade.bestTradeExactOut(
+      [pair],
+      quoteToken,
+      nativeTokenAmount,
+      { maxHops: 1 }
+    );
     if (!trades || trades.length === 0) {
-      throw new UniswapishPriceError(`priceSwapOut: no trade pair found for ${quoteToken.address} to ${baseToken.address}.`);
+      throw new UniswapishPriceError(
+        `priceSwapOut: no trade pair found for ${quoteToken.address} to ${baseToken.address}.`
+      );
     }
-    logger.info(`Best trade for ${quoteToken.address}-${baseToken.address}: ${trades[0]}`);
+    logger.info(
+      `Best trade for ${quoteToken.address}-${baseToken.address}: ${trades[0]}`
+    );
 
-    const expectedAmount = trades[0].maximumAmountIn(this.getAllowedSlippage(allowedSlippage));
+    const expectedAmount = trades[0].maximumAmountIn(
+      this.getAllowedSlippage(allowedSlippage)
+    );
     return { trade: trades[0], expectedAmount };
   }
 

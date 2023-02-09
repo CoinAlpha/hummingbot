@@ -5,6 +5,7 @@ import {
   TokensResponse,
 } from './network.requests';
 import { Avalanche } from '../chains/avalanche/avalanche';
+import { BinanceSmartChain } from '../chains/binance-smart-chain/binance-smart-chain';
 import { Ethereum } from '../chains/ethereum/ethereum';
 import { Harmony } from '../chains/harmony/harmony';
 import { Polygon } from '../chains/polygon/polygon';
@@ -16,6 +17,9 @@ import {
   UNKNOWN_KNOWN_CHAIN_ERROR_MESSAGE,
 } from '../services/error-handler';
 import { EthereumBase } from '../services/ethereum-base';
+import { Cronos } from '../chains/cronos/cronos';
+import { Near } from '../chains/near/near';
+import { Nearish } from '../services/common-interfaces';
 
 export async function getStatus(
   req: StatusRequest
@@ -31,6 +35,8 @@ export async function getStatus(
   if (req.chain) {
     if (req.chain === 'avalanche') {
       connections.push(Avalanche.getInstance(req.network as string));
+    } else if (req.chain === 'binance-smart-chain') {
+      connections.push(BinanceSmartChain.getInstance(req.network as string));
     } else if (req.chain === 'harmony') {
       connections.push(Harmony.getInstance(req.network as string));
     } else if (req.chain === 'ethereum') {
@@ -39,6 +45,10 @@ export async function getStatus(
       connections.push(Polygon.getInstance(req.network as string));
     } else if (req.chain === 'xdc') {
       connections.push(Xdc.getInstance(req.network as string));
+    } else if (req.chain === 'near') {
+      connections.push(Near.getInstance(req.network as string));
+    } else if (req.chain === 'cronos') {
+      connections.push(await Cronos.getInstance(req.network as string));
     } else {
       throw new HttpException(
         500,
@@ -51,14 +61,17 @@ export async function getStatus(
     connections = connections.concat(
       avalancheConnections ? Object.values(avalancheConnections) : []
     );
+
     const harmonyConnections = Harmony.getConnectedInstances();
     connections = connections.concat(
       harmonyConnections ? Object.values(harmonyConnections) : []
     );
+
     const ethereumConnections = Ethereum.getConnectedInstances();
     connections = connections.concat(
       ethereumConnections ? Object.values(ethereumConnections) : []
     );
+
     const polygonConnections = Polygon.getConnectedInstances();
     connections = connections.concat(
       polygonConnections ? Object.values(polygonConnections) : []
@@ -67,13 +80,26 @@ export async function getStatus(
     connections = connections.concat(
       xdcConnections ? Object.values(xdcConnections) : []
     );
+    const cronosConnections = Cronos.getConnectedInstances();
+    connections = connections.concat(
+      cronosConnections ? Object.values(cronosConnections) : []
+    );
+
+    const nearConnections = Near.getConnectedInstances();
+    connections = connections.concat(
+      nearConnections ? Object.values(nearConnections) : []
+    );
+
+    const bscConnections = BinanceSmartChain.getConnectedInstances();
+    connections = connections.concat(
+      bscConnections ? Object.values(bscConnections) : []
+    );
   }
 
   for (const connection of connections) {
     if (!connection.ready()) {
       await connection.init();
     }
-
     chain = connection.chain;
     chainId = connection.chainId;
     rpcUrl = connection.rpcUrl;
@@ -97,12 +123,14 @@ export async function getStatus(
 }
 
 export async function getTokens(req: TokensRequest): Promise<TokensResponse> {
-  let connection: EthereumBase;
+  let connection: EthereumBase | Nearish;
   let tokens: TokenInfo[] = [];
 
   if (req.chain && req.network) {
     if (req.chain === 'avalanche') {
       connection = Avalanche.getInstance(req.network);
+    } else if (req.chain === 'binance-smart-chain') {
+      connection = BinanceSmartChain.getInstance(req.network);
     } else if (req.chain === 'harmony') {
       connection = Harmony.getInstance(req.network);
     } else if (req.chain === 'ethereum') {
@@ -111,6 +139,10 @@ export async function getTokens(req: TokensRequest): Promise<TokensResponse> {
       connection = Polygon.getInstance(req.network);
     } else if (req.chain === 'xdc') {
       connection = Xdc.getInstance(req.network);
+    } else if (req.chain === 'near') {
+      connection = Near.getInstance(req.network);
+    } else if (req.chain === 'cronos') {
+      connection = await Cronos.getInstance(req.network);
     } else {
       throw new HttpException(
         500,

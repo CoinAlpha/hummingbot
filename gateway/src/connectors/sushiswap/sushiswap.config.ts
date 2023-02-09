@@ -6,7 +6,7 @@ export namespace SushiswapConfig {
     allowedSlippage: string;
     gasLimitEstimate: number;
     ttl: number;
-    sushiswapRouterAddress: (chain: string, network: string) => string;
+    sushiswapRouterAddress: (network: string) => string;
     tradingTypes: Array<string>;
     availableNetworks: Array<AvailableNetworks>;
   }
@@ -19,14 +19,13 @@ export namespace SushiswapConfig {
       'sushiswap.gasLimitEstimate'
     ),
     ttl: ConfigManagerV2.getInstance().get('sushiswap.ttl'),
-    sushiswapRouterAddress: (chain: string, network: string) =>
+    sushiswapRouterAddress: (network: string) =>
       ConfigManagerV2.getInstance().get(
-        'sushiswap.' + chain + '.' + network + '.sushiswapRouterAddress'
+        'sushiswap.contractAddresses.' + network + '.sushiswapRouterAddress'
       ),
     tradingTypes: ['EVM_AMM'],
     availableNetworks: [
       { chain: 'ethereum', networks: ['mainnet', 'kovan', 'ropsten'] },
-      { chain: 'polygon', networks: ['mainnet', 'mumbai'] },
     ],
   };
 }

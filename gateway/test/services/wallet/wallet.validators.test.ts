@@ -6,8 +6,9 @@ import {
   invalidAddressError,
   validateChain,
   validateAddress,
-  isSolPrivateKey,
-  invalidSolPrivateKeyError,
+  isNearPrivateKey,
+  isCosmosPrivateKey,
+  invalidCosmosPrivateKeyError,
 } from '../../../src/services/wallet/wallet.validators';
 
 import { missingParameter } from '../../../src/services/validators';
@@ -38,27 +39,35 @@ describe('isEthPrivateKey', () => {
   });
 });
 
-describe('isSolPrivateKey', () => {
-  it('pass against a well formed base58 private key', () => {
+describe('isCosmosPrivateKey', () => {
+  it('pass against a well formed private key', () => {
     expect(
-      isSolPrivateKey(
-        '5r1MuqBa3L9gpXHqULS3u2B142c5jA8szrEiL8cprvhjJDe6S2xz9Q4uppgaLegmuPpq4ftBpcMw7NNoJHJefiTt'
+      isCosmosPrivateKey(
+        '218507defde7d91a9eba858437115b8aea68e3cbc7a4b68b3edac53d5ec89515' // noqa: mock
       )
     ).toEqual(true);
   });
 
-  it('fail against a string that is too short', () => {
+  it('fail against a string that is invalid', () => {
     expect(
-      isSolPrivateKey('5r1MuqBa3L9gpXHqULS3u2B142c5jA8szrEiL8cprvhjJDe6S2xz9Q4')
-    ).toEqual(false);
-  });
-
-  it('fail against a string that has non-base58 characters', () => {
-    expect(
-      isSolPrivateKey(
-        '5r1MuqBa3L9gpXHqULS3u2B142c5jA8szrEiL8cprvhjJDe6S2xz9Q4uppgaLegmuPpq4ftBpcMw7NNoJHO0O0O0'
+      isCosmosPrivateKey(
+        '218507defde7d91a9eba858437115b8aea68e3cbc7a4b68b3edac53d5ec8951' // noqa: mock
       )
     ).toEqual(false);
+  });
+});
+
+describe('isNearPrivateKey', () => {
+  it('pass against a well formed private key', () => {
+    expect(
+      isNearPrivateKey(
+        'ed25519:5r1MuqBa3L9gpXHqULS3u2B142c5jA8szrEiL8cprvhjJDe6S2xz9Q4uppgaLegmuPpq4ftBpcMw7NNoJHJefiTt'
+      )
+    ).toEqual(true);
+  });
+
+  it('fail against a string that is invalid', () => {
+    expect(isEthPrivateKey('ed25519')).toEqual(false);
   });
 });
 
@@ -73,12 +82,72 @@ describe('validatePrivateKey', () => {
     ).toEqual([]);
   });
 
-  it('valid when req.privateKey is a solana key', () => {
+  it('valid when req.privateKey is a near key', () => {
     expect(
       validatePrivateKey({
-        chain: 'solana',
+        chain: 'near',
         privateKey:
-          '5r1MuqBa3L9gpXHqULS3u2B142c5jA8szrEiL8cprvhjJDe6S2xz9Q4uppgaLegmuPpq4ftBpcMw7NNoJHJefiTt',
+          'ed25519:5r1MuqBa3L9gpXHqULS3u2B142c5jA8szrEiL8cprvhjJDe6S2xz9Q4uppgaLegmuPpq4ftBpcMw7NNoJHJefiTt',
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when req.privateKey is a harmony key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'harmony',
+        privateKey:
+          'da857cbda0ba96757fed842617a40693d06d00001e55aa972955039ae747bac4', // noqa: mock
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when req.privateKey is a cronos key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'cronos',
+        privateKey:
+          'da857cbda0ba96757fed842617a40693d06d00001e55aa972955039ae747bac4', // noqa: mock
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when req.privateKey is a polygon key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'polygon',
+        privateKey:
+          'da857cbda0ba96757fed842617a40693d06d00001e55aa972955039ae747bac4', // noqa: mock
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when req.privateKey is a avalanche key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'avalanche',
+        privateKey:
+          'da857cbda0ba96757fed842617a40693d06d00001e55aa972955039ae747bac4', // noqa: mock
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when req.privateKey is an binance-smart-chain key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'binance-smart-chain',
+        privateKey:
+          'da857cbda0ba96757fed842617a40693d06d00001e55aa972955039ae747bac4', // noqa: mock
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when req.privateKey is a cosmos key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'cosmos',
+        privateKey:
+          '218507defde7d91a9eba858437115b8aea68e3cbc7a4b68b3edac53d5ec89516', // noqa: mock
       })
     ).toEqual([]);
   });
@@ -110,13 +179,22 @@ describe('validatePrivateKey', () => {
     ).toEqual([invalidEthPrivateKeyError]);
   });
 
-  it('return error when req.privateKey is invalid solana key', () => {
+  it('return error when req.privateKey is invalid binance-smart-chain key', () => {
     expect(
       validatePrivateKey({
-        chain: 'solana',
-        privateKey: 'world',
+        chain: 'binance-smart-chain',
+        privateKey: 'someErroneousPrivateKey',
       })
-    ).toEqual([invalidSolPrivateKeyError]);
+    ).toEqual([invalidEthPrivateKeyError]);
+  });
+
+  it('return error when req.privateKey is invalid cosmos key', () => {
+    expect(
+      validatePrivateKey({
+        chain: 'cosmos',
+        privateKey: 'someErroneousPrivateKey',
+      })
+    ).toEqual([invalidCosmosPrivateKeyError]);
   });
 });
 
@@ -137,18 +215,42 @@ describe('validateChain', () => {
     ).toEqual([]);
   });
 
-  it('valid when chain is solana', () => {
-    expect(
-      validateChain({
-        chain: 'solana',
-      })
-    ).toEqual([]);
-  });
-
   it('valid when chain is harmony', () => {
     expect(
       validateChain({
         chain: 'harmony',
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when chain is binance-smart-chain', () => {
+    expect(
+      validateChain({
+        chain: 'binance-smart-chain',
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when chain is cronos', () => {
+    expect(
+      validateChain({
+        chain: 'cronos',
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when chain is binance-smart-chain', () => {
+    expect(
+      validateChain({
+        chain: 'binance-smart-chain',
+      })
+    ).toEqual([]);
+  });
+
+  it('valid when chain is cosmos', () => {
+    expect(
+      validateChain({
+        chain: 'cosmos',
       })
     ).toEqual([]);
   });

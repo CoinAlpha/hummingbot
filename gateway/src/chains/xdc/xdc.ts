@@ -67,7 +67,7 @@ export class Xdc extends EthereumBase implements Ethereumish {
   getSpender(reqSpender: string): string {
     let spender: string;
     if (reqSpender === 'xdcswap') {
-        spender = XdcswapConfig.config.routerAddress(this._chain);
+      spender = XdcswapConfig.config.routerAddress(this._chain);
     } else {
       spender = convertXdcPublicKey(reqSpender);
     }
@@ -76,7 +76,9 @@ export class Xdc extends EthereumBase implements Ethereumish {
 
   // cancel transaction
   async cancelTx(wallet: Wallet, nonce: number): Promise<Transaction> {
-    logger.info('Canceling any existing transaction(s) with nonce number ' + nonce + '.');
+    logger.info(
+      'Canceling any existing transaction(s) with nonce number ' + nonce + '.'
+    );
     return super.cancelTxWithGasPrice(wallet, nonce, this._gasPrice * 2);
   }
 }
