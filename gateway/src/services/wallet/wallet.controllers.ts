@@ -28,8 +28,7 @@ import {
 } from '../error-handler';
 import { EthereumBase } from '../ethereum-base';
 import { Near } from '../../chains/near/near';
-// TODO: fix XDC things
-// import { convertXdcPrivateKey } from '../../helpers';
+import { convertXdcPrivateKey } from '../../helpers';
 
 const walletPath = './conf/wallets';
 export async function mkdirIfDoesNotExist(path: string): Promise<void> {
@@ -74,10 +73,6 @@ export async function addWallet(
     connection = BinanceSmartChain.getInstance(req.network);
   } else if (req.chain === 'xdc') {
     connection = Xdc.getInstance(req.network);
-    // const xdc = Xdc.getInstance(req.network);
-    // const privateKey = convertXdcPrivateKey(req.privateKey);
-    // address = xdc.getWalletFromPrivateKey(privateKey).address;
-    // encryptedPrivateKey = await xdc.encrypt(privateKey, passphrase);
   } else {
     throw new HttpException(
       500,
@@ -92,11 +87,17 @@ export async function addWallet(
 
   try {
     if (connection instanceof EthereumBase) {
-      address = connection.getWalletFromPrivateKey(req.privateKey).address;
-      encryptedPrivateKey = await connection.encrypt(
-        req.privateKey,
-        passphrase
-      );
+      if (connection.chainName === 'xdc') {
+        const privateKey = convertXdcPrivateKey(req.privateKey);
+        address = connection.getWalletFromPrivateKey(privateKey).address;
+        encryptedPrivateKey = await connection.encrypt(privateKey, passphrase);
+      } else {
+        address = connection.getWalletFromPrivateKey(req.privateKey).address;
+        encryptedPrivateKey = await connection.encrypt(
+          req.privateKey,
+          passphrase
+        );
+      }
     } else if (connection instanceof Cosmos) {
       const wallet = await connection.getAccountsfromPrivateKey(
         req.privateKey,
@@ -115,11 +116,7 @@ export async function addWallet(
         )
       ).accountId;
       encryptedPrivateKey = connection.encrypt(req.privateKey, passphrase);
-    } //  else if (connection instanceof Xdc) {
-    //   const privateKey = convertXdcPrivateKey(req.privateKey);
-    //   address = connection.getWalletFromPrivateKey(privateKey).address;
-    //   encryptedPrivateKey = await connection.encrypt(privateKey, passphrase);
-    // }
+    }
 
     if (address === undefined || encryptedPrivateKey === undefined) {
       throw new Error('ERROR_RETRIEVING_WALLET_ADDRESS_ERROR_CODE');
