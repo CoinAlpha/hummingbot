@@ -8,6 +8,9 @@ import { XdcswapConfig } from '../../connectors/xdcswap/xdcswap.config';
 import { Ethereumish } from '../../services/common-interfaces';
 import { ConfigManagerV2 } from '../../services/config-manager-v2';
 import { convertXdcPublicKey } from '../../helpers';
+import { walletPath } from '../../services/base';
+import fse from 'fs-extra';
+import { ConfigManagerCertPassphrase } from '../../services/config-manager-cert-passphrase';
 
 export class Xdc extends EthereumBase implements Ethereumish {
   private static _instances: { [name: string]: Xdc };
@@ -80,6 +83,22 @@ export class Xdc extends EthereumBase implements Ethereumish {
       'Canceling any existing transaction(s) with nonce number ' + nonce + '.'
     );
     return super.cancelTxWithGasPrice(wallet, nonce, this._gasPrice * 2);
+  }
+
+  // override
+  async getWallet(address: string): Promise<Wallet> {
+    const path = `${walletPath}/${this.chainName}`;
+
+    const encryptedPrivateKey: string = await fse.readFile(
+      `${path}/${convertXdcPublicKey(address)}.json`,
+      'utf8'
+    );
+
+    const passphrase = ConfigManagerCertPassphrase.readPassphrase();
+    if (!passphrase) {
+      throw new Error('missing passphrase');
+    }
+    return await this.decrypt(encryptedPrivateKey, passphrase);
   }
 
   async close() {
