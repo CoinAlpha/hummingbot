@@ -96,7 +96,10 @@ export class BinanceSmartChain extends EthereumBase implements Ethereumish {
     if (reqSpender === 'pancakeswap') {
       spender = PancakeSwapConfig.config.routerAddress(this._chain);
     } else if (reqSpender === 'sushiswap') {
-      spender = SushiswapConfig.config.sushiswapRouterAddress(this.chainName);
+      spender = SushiswapConfig.config.sushiswapRouterAddress(
+        this.chainName,
+        this._chain
+      );
     } else {
       spender = reqSpender;
     }
