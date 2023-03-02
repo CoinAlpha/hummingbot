@@ -153,9 +153,7 @@ class GatewayInFlightOrder(InFlightOrder):
 
         self.current_state = order_update.new_state
         misc_updates = order_update.misc_updates or {}
-        self._creation_transaction_hash = (
-            misc_updates.get("creation_transaction_hash", self._creation_transaction_hash)
-        )
+        self._creation_transaction_hash = misc_updates.get("creation_transaction_hash", self._creation_transaction_hash)
         self._cancel_tx_hash = misc_updates.get("cancelation_transaction_hash", self._cancel_tx_hash)
         if self.current_state not in {OrderState.PENDING_CANCEL, OrderState.CANCELED}:
             self.nonce = misc_updates.get("nonce", None)
@@ -228,3 +226,11 @@ class GatewayInFlightOrder(InFlightOrder):
             "creation_transaction_hash": self._creation_transaction_hash,
             "gas_price": str(self._gas_price),
         }
+
+
+class GatewayPerpetualInFlightOrder(GatewayInFlightOrder):
+    def build_order_created_message(self) -> str:
+        return (
+            f"Created {self.order_type.name.upper()} {self.trade_type.name.upper()} order "
+            f"{self.client_order_id} for {self.amount} to {self.position.name.upper()} a {self.trading_pair} position."
+        )
