@@ -1188,7 +1188,6 @@ class GatewayHttpClient:
         price: Decimal,
         size: Decimal,
     ) -> Dict[str, Any]:
-        # TODO: Update request payload to include is_derivative
         request_payload = {
             "connector": connector,
             "chain": chain,
@@ -1211,7 +1210,6 @@ class GatewayHttpClient:
         address: str,
         exchange_order_id: str,
     ):
-        # TODO: Update request payload to include is_derivative
         request_payload = {
             "connector": connector,
             "chain": chain,
@@ -1221,3 +1219,5 @@ class GatewayHttpClient:
             "orderId": exchange_order_id,
         }
         return await self.api_request("delete", "clob/orders", request_payload)
+
+    # TODO: Include new perp route wrapper functions
