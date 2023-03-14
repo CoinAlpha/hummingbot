@@ -1187,6 +1187,7 @@ class GatewayHttpClient:
         order_type: OrderType,
         price: Decimal,
         size: Decimal,
+        leverage: Optional[int] = None
     ) -> Dict[str, Any]:
         request_payload = {
             "connector": connector,
@@ -1199,6 +1200,10 @@ class GatewayHttpClient:
             "price": str(price),
             "amount": str(size),
         }
+        if leverage is not None:
+            request_payload.update({
+                "leverage": leverage
+            })
         return await self.api_request("post", "clob/orders", request_payload)
 
     async def clob_cancel_order(
@@ -1220,4 +1225,49 @@ class GatewayHttpClient:
         }
         return await self.api_request("delete", "clob/orders", request_payload)
 
-    # TODO: Include new perp route wrapper functions
+    async def clob_injective_balances(
+        self,
+        chain: str,
+        network: str,
+        address: str
+    ):
+        request_payload = {
+            "chain": chain,
+            "network": network,
+            "address": address,
+        }
+        return await self.api_request("get", "injective/balances", request_payload)
+
+    async def clob_perp_funding_rates(
+        self,
+        chain: str,
+        network: str,
+        connector: str,
+        trading_pair: str
+    ):
+        request_payload = {
+            "chain": chain,
+            "network": network,
+            "connector": connector,
+            "market": trading_pair
+        }
+        return await self.api_request("get", "clob/perp/funding/rates", request_payload)
+
+    async def clob_perp_funding_payments(
+        self,
+        address: str,
+        chain: str,
+        connector: str,
+        network: str,
+        trading_pair: str,
+        **kwargs
+    ):
+        request_payload = {
+            "chain": chain,
+            "network": network,
+            "connector": connector,
+            "market": trading_pair,
+            "address": address
+        }
+        request_payload.update(kwargs)
+        return await self.api_request("get", "clob/perp/funding/payments", request_payload)
