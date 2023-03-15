@@ -1236,7 +1236,7 @@ class GatewayHttpClient:
             "network": network,
             "address": address,
         }
-        return await self.api_request("get", "injective/balances", request_payload)
+        return await self.api_request("post", "injective/balances", request_payload)
 
     async def clob_perp_funding_rates(
         self,

@@ -17,10 +17,6 @@ if TYPE_CHECKING:
     from hummingbot.client.config.config_data_types import BaseConnectorConfigMap
     from hummingbot.client.config.config_helpers import ClientConfigAdapter
     from hummingbot.connector.connector_base import ConnectorBase
-
-    # from hummingbot.connector.gateway.clob_perp.data_sources.gateway_clob_perp_api_data_source_base import (
-    #     GatewayCLOBPerpAPIDataSourceBase,
-    # )
     from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import (
         GatewayCLOBAPIDataSourceBase,
     )
@@ -218,7 +214,7 @@ class ConnectorSetting(NamedTuple):
             file_name = self.module_name().split('.')[-1]
             splited_name = file_name.split('_')
             for i in range(len(splited_name)):
-                if splited_name[i] in ['evm', 'amm', 'clob', 'lp', 'sol', 'spot', 'perp']:
+                if splited_name[i] in ['evm', 'amm', 'clob', 'lp', 'sol', 'spot']:
                     splited_name[i] = splited_name[i].upper()
                 else:
                     splited_name[i] = splited_name[i].capitalize()
@@ -228,13 +224,19 @@ class ConnectorSetting(NamedTuple):
     def get_api_data_source_module_name(self) -> str:
         module_name = ""
         if self.uses_clob_connector():
-            module_name = f"{self.name.split('_')[0]}_api_data_source"
+            if self.type == ConnectorType.CLOB_PERP:
+                module_name = f"{self.name.rsplit(sep='_', maxsplit=2)[0]}_api_data_source"
+            else:
+                module_name = f"{self.name.split('_')[0]}_api_data_source"
         return module_name
 
     def get_api_data_source_class_name(self) -> str:
         class_name = ""
         if self.uses_clob_connector():
-            class_name = f"{self.name.split('_')[0].capitalize()}APIDataSource"
+            if self.type == ConnectorType.CLOB_PERP:
+                class_name = f"{self.name.split('_')[0].capitalize()}PerpetualAPIDataSource"
+            else:
+                class_name = f"{self.name.split('_')[0].capitalize()}APIDataSource"
         return class_name
 
     def conn_init_parameters(
@@ -331,7 +333,7 @@ class ConnectorSetting(NamedTuple):
     ) -> "GatewayCLOBAPIDataSourceBase":
         module_name = self.get_api_data_source_module_name()
         parent_package = f"hummingbot.connector.gateway.{self._get_module_package()}.data_sources"
-        module_package = self.name.split("_")[0]
+        module_package = self.name.rsplit(sep="_", maxsplit=2)[0]
         module_path = f"{parent_package}.{module_package}.{module_name}"
         module: ModuleType = importlib.import_module(module_path)
         api_data_source_class = getattr(module, self.get_api_data_source_class_name())
