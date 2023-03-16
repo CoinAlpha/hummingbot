@@ -1187,7 +1187,6 @@ class GatewayHttpClient:
         order_type: OrderType,
         price: Decimal,
         size: Decimal,
-        leverage: Optional[int] = None
     ) -> Dict[str, Any]:
         request_payload = {
             "connector": connector,
@@ -1200,10 +1199,6 @@ class GatewayHttpClient:
             "price": str(price),
             "amount": str(size),
         }
-        if leverage is not None:
-            request_payload.update({
-                "leverage": leverage
-            })
         return await self.api_request("post", "clob/orders", request_payload)
 
     async def clob_cancel_order(
