@@ -1353,11 +1353,12 @@ class GatewayHttpClient:
         request_payload.update(kwargs)
         return await self.api_request("get", "clob/perp/funding/payments", request_payload)
 
-    async def clob_get_perp_orders(
+    async def clob_perp_get_orders(
         self,
         chain: str,
         network: str,
         connector: str,
+        market: str,
         address: str = None,
         order_id: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -1365,6 +1366,7 @@ class GatewayHttpClient:
             "chain": chain,
             "network": network,
             "connector": connector,
+            "market": market
         }
 
         if address is not None:
@@ -1373,7 +1375,7 @@ class GatewayHttpClient:
         if order_id is not None:
             request["orderId"] = order_id
 
-        return await self.api_request("get", "clob/perp/orders", request, use_body=True)
+        return await self.api_request("get", "clob/perp/orders", request)
 
     async def clob_perp_get_order_trades(
         self,
@@ -1447,7 +1449,7 @@ class GatewayHttpClient:
             "market": trading_pair,
             "price": str(price),
             "amount": str(size),
-            "leverage": str(leverage),
+            "leverage": float(leverage),
             "side": trade_type.name,
             "orderType": order_type.name
         }
