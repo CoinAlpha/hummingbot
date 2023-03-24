@@ -1301,23 +1301,7 @@ class GatewayHttpClient:
             "network": network,
             "address": address,
         }
-        return await self.api_request("post", "injective/balances", request_payload)
-
-    async def clob_perp_funding_rates(
-        self,
-        chain: str,
-        network: str,
-        connector: str,
-        trading_pair: str
-    ):
-        # TODO: Remove once GET clob/perp/funding/info endpoint is finalized
-        request_payload = {
-            "chain": chain,
-            "network": network,
-            "connector": connector,
-            "market": trading_pair
-        }
-        return await self.api_request("get", "clob/perp/funding/rates", request_payload)
+        return await self.api_request("post", "injective/balances", request_payload, use_body=True)
 
     async def clob_perp_funding_info(
         self,
@@ -1332,7 +1316,7 @@ class GatewayHttpClient:
             "connector": connector,
             "market": trading_pair,
         }
-        return await self.api_request("get", "clob/perp/funding/info", request_payload)
+        return await self.api_request("post", "clob/perp/funding/info", request_payload, use_body=True)
 
     async def clob_perp_funding_payments(
         self,
@@ -1351,7 +1335,7 @@ class GatewayHttpClient:
             "address": address
         }
         request_payload.update(kwargs)
-        return await self.api_request("get", "clob/perp/funding/payments", request_payload)
+        return await self.api_request("post", "clob/perp/funding/payments", request_payload, use_body=True)
 
     async def clob_perp_get_orders(
         self,
@@ -1392,7 +1376,7 @@ class GatewayHttpClient:
             "address": address,
             "orderId": order_id
         }
-        return await self.api_request("get", "clob/perp/order/trades", request, use_body=True)
+        return await self.api_request("get", "clob/perp/order/trades", request)
 
     async def clob_perp_positions(
         self,
@@ -1401,17 +1385,15 @@ class GatewayHttpClient:
         connector: str,
         network: str,
         trading_pairs: List[str],
-        **kwargs
     ):
         request_payload = {
             "chain": chain,
             "network": network,
             "connector": connector,
-            "address": address,
-            "markets": trading_pairs
+            "markets": trading_pairs,
+            "address": address
         }
-        request_payload.update(kwargs)
-        return await self.api_request("post", "clob/perp/positions", request_payload)
+        return await self.api_request("post", "clob/perp/positions", request_payload, use_body=True)
 
     async def clob_perp_last_trade_price(
         self,
@@ -1426,7 +1408,7 @@ class GatewayHttpClient:
             "connector": connector,
             "market": trading_pair
         }
-        return await self.api_request("post", "clob/perp/lastTradePrice", request_payload)
+        return await self.api_request("get", "clob/perp/lastTradePrice", request_payload)
 
     async def clob_perp_place_order(
         self,
@@ -1453,7 +1435,7 @@ class GatewayHttpClient:
             "side": trade_type.name,
             "orderType": order_type.name
         }
-        return await self.api_request("post", "clob/perp/orders", request_payload)
+        return await self.api_request("post", "clob/perp/orders", request_payload, use_body=True)
 
     async def clob_perp_cancel_order(
         self,
@@ -1472,4 +1454,4 @@ class GatewayHttpClient:
             "market": trading_pair,
             "orderId": exchange_order_id
         }
-        return await self.api_request("delete", "clob/perp/orders", request_payload)
+        return await self.api_request("delete", "clob/perp/orders", request_payload, use_body=True)
