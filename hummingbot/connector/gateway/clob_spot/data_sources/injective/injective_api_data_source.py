@@ -39,8 +39,11 @@ from hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_con
     BACKEND_TO_CLIENT_ORDER_STATE_MAP,
     CLIENT_TO_BACKEND_ORDER_TYPES_MAP,
     CONNECTOR_NAME,
+    FETCH_STATUS_RETRY_DELAY,
+    GATEWAY_PLACE_ORDER_DELAY,
     LOST_ORDER_COUNT_LIMIT,
     MARKETS_UPDATE_INTERVAL,
+    MAX_FETCH_STATUS_ATTEMPTS,
     MSG_BATCH_UPDATE_ORDERS,
     MSG_CANCEL_SPOT_ORDER,
     MSG_CREATE_SPOT_LIMIT_ORDER,
@@ -123,7 +126,7 @@ class InjectiveAPIDataSource(CLOBAPIDataSourceBase):
         self._connector_name = CONNECTOR_NAME
         self._chain = connector_spec["chain"]
         self._network = connector_spec["network"]
-        self._sub_account_id = connector_spec["wallet_address"]
+        self._sub_account_id = connector_spec["wallet_address"].lower()
         self._account_address: str = Address(bytes.fromhex(self._sub_account_id[2:-24])).to_acc_bech32()
         if self._network == "mainnet":
             self._network_obj = Network.mainnet()
@@ -505,34 +508,42 @@ class InjectiveAPIDataSource(CLOBAPIDataSourceBase):
             "cancelation_transaction_hash": in_flight_order.cancel_tx_hash,
         }
 
-        market = self._markets_info[trading_pair]
-        direction = "buy" if in_flight_order.trade_type == TradeType.BUY else "sell"
-        status_update = await self._get_booked_order_status_update(
-            trading_pair=trading_pair,
-            client_order_id=in_flight_order.client_order_id,
-            order_hash=order_hash,
-            market_id=market.market_id,
-            direction=direction,
-            creation_timestamp=in_flight_order.creation_timestamp,
-            order_type=in_flight_order.order_type,
-            trade_type=in_flight_order.trade_type,
-            order_mist_updates=misc_updates,
-        )
-        if status_update is None and in_flight_order.creation_transaction_hash is not None:
-            creation_transaction = await self._get_transaction_by_hash(
-                transaction_hash=in_flight_order.creation_transaction_hash
+        fetch_status_attempts = 0
+        # Indexer may lag reporting order status once it's filled, so we need to retry a few times.
+        while fetch_status_attempts < MAX_FETCH_STATUS_ATTEMPTS:
+            market = self._markets_info[trading_pair]
+            direction = "buy" if in_flight_order.trade_type == TradeType.BUY else "sell"
+            status_update = await self._get_booked_order_status_update(
+                trading_pair=trading_pair,
+                client_order_id=in_flight_order.client_order_id,
+                order_hash=order_hash,
+                market_id=market.market_id,
+                direction=direction,
+                creation_timestamp=in_flight_order.creation_timestamp,
+                order_type=in_flight_order.order_type,
+                trade_type=in_flight_order.trade_type,
+                order_mist_updates=misc_updates,
             )
-            if await self._check_if_order_failed_based_on_transaction(
-                transaction=creation_transaction, order=in_flight_order
-            ):
-                status_update = OrderUpdate(
-                    trading_pair=in_flight_order.trading_pair,
-                    update_timestamp=creation_transaction.data.block_unix_timestamp * 1e-3,
-                    new_state=OrderState.FAILED,
-                    client_order_id=in_flight_order.client_order_id,
-                    exchange_order_id=in_flight_order.exchange_order_id,
-                    misc_updates=misc_updates,
+            if status_update is None and in_flight_order.creation_transaction_hash is not None:
+                creation_transaction = await self._get_transaction_by_hash(
+                    transaction_hash=in_flight_order.creation_transaction_hash
                 )
+                if await self._check_if_order_failed_based_on_transaction(
+                    transaction=creation_transaction, order=in_flight_order
+                ):
+                    status_update = OrderUpdate(
+                        trading_pair=in_flight_order.trading_pair,
+                        update_timestamp=creation_transaction.data.block_unix_timestamp * 1e-3,
+                        new_state=OrderState.FAILED,
+                        client_order_id=in_flight_order.client_order_id,
+                        exchange_order_id=in_flight_order.exchange_order_id,
+                        misc_updates=misc_updates,
+                    )
+            if status_update is not None:
+                break
+            fetch_status_attempts += 1
+            await asyncio.sleep(FETCH_STATUS_RETRY_DELAY)
+
         if status_update is None:
             raise IOError(f"No update found for order {in_flight_order.client_order_id}")
 
@@ -1030,7 +1041,7 @@ class InjectiveAPIDataSource(CLOBAPIDataSourceBase):
                 market_id=market_id,
                 subaccount_id=self._sub_account_id,
                 direction=direction,
-                start_time=start_time,
+                start_time=int((start_time - GATEWAY_PLACE_ORDER_DELAY) * 1e3),
                 skip=skip,
                 order_types=[CLIENT_TO_BACKEND_ORDER_TYPES_MAP[(trade_type, order_type)]]
             )

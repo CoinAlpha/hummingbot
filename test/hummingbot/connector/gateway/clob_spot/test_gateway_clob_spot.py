@@ -1070,7 +1070,9 @@ class GatewayCLOBSPOTTest(unittest.TestCase):
             timestamp=self.start_timestamp, order=order, is_failed=True
         )
 
-        self.async_run_with_timeout(self.exchange._update_order_status())
+        with(patch('hummingbot.connector.gateway.clob_spot.data_sources.injective.injective_api_data_source'
+                   '.MAX_FETCH_STATUS_ATTEMPTS', return_value=1)):
+            self.async_run_with_timeout(self.exchange._update_order_status())
 
         self.assertTrue(order.is_open)
         self.assertFalse(order.is_filled)
