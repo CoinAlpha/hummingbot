@@ -1,7 +1,9 @@
 import asyncio
 from typing import Dict, List, Optional
 
-from hummingbot.connector.gateway.clob_spot.data_sources.clob_api_data_source_base import CLOBAPIDataSourceBase
+from hummingbot.connector.gateway.clob_spot.data_sources.gateway_clob_api_data_source_base import (
+    GatewayCLOBAPIDataSourceBase,
+)
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.event.event_forwarder import EventForwarder
@@ -11,7 +13,7 @@ from hummingbot.core.event.events import OrderBookDataSourceEvent
 class GatewayCLOBSPOTAPIOrderBookDataSource(OrderBookTrackerDataSource):
     _logger = None
 
-    def __init__(self, trading_pairs: List[str], api_data_source: CLOBAPIDataSourceBase):
+    def __init__(self, trading_pairs: List[str], api_data_source: GatewayCLOBAPIDataSourceBase):
         super().__init__(trading_pairs=trading_pairs)
         self._api_data_source = api_data_source
         self._forwarders: List[EventForwarder] = []

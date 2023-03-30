@@ -2,7 +2,6 @@ import logging
 from typing import Any, Dict
 
 import ujson
-from commlib.serializer import JSONSerializer
 
 
 class FakeMQTTMessage(object):
@@ -50,7 +49,7 @@ class FakeMQTTBroker:
                 msg_found = True
             else:
                 for msg in self.received_msgs[topic]:
-                    if str(content) == str(msg[msg_key]):
+                    if content == msg[msg_key]:
                         msg_found = True
                         break
         return msg_found
@@ -78,7 +77,6 @@ class FakeMQTTTransport:
 
     def publish(self, topic: str, payload: Dict[str, Any], qos: Any, retain: bool = False):
         logging.info(f"\nFakeMQTT publish on\n> {topic}\n     {payload}\n")
-        payload = ujson.loads(JSONSerializer.serialize(payload))
         if not self._received_msgs.get(topic):
             self._received_msgs[topic] = []
         self._received_msgs[topic].append(payload)

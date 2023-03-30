@@ -1,13 +1,21 @@
 # Installation
 
-Formerly, this folder contains automated scripts for installing Hummingbot via Docker and from source. It has now been deprecated in favor of newer, updated instructions.
+This folder contains automated scripts for installing Hummingbot and operating it with Docker.
 
-### Via Docker
+For full documentation, please vist the [Hummingbot Installation Guide](https://docs.hummingbot.io/installation/).
 
-Visit the [Deploy Examples](https://github.com/hummingbot/deploy-examples) repo for instructions for deploying Hummingbot in various configurations with Docker.
+## Installation using Docker (Recommended)
 
-### From Source
+- Install on a cloud server
+- Linux OS: Ubuntu 16.04 or later
+- Docker
 
-For advanced users and developers who would like to access and modify the Hummingbot program files, installation from source is preferred. 
+If you do not have Docker installed: [install Docker and Hummingbot](./install-docker/).
 
-Visit the [Installation](https://docs.hummingbot.io/installation/) section in the Hummingbot docs for platform-specific guides.
+If you already have Docker installed: proceed to [docker commands](./docker-commands/).
+
+## Installation from Source
+
+For advanced users and developers who would like to access and modify the Hummingbot program files, installation from source is preferred:
+
+[Install from Source](./install-from-source/)
