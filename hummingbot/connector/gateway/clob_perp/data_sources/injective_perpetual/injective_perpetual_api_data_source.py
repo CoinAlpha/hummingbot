@@ -774,7 +774,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
             response = await self._client.get_oracle_prices(
                 base_symbol=market_info["baseTokenMeta"]["symbol"],
                 quote_symbol=market_info["quoteTokenMeta"]["symbol"],
-                oracle_type=market_info.oracle_type,
+                oracle_type='bandibc',
                 oracle_scale_factor=0,
             )
         return Decimal(response.price)
@@ -1140,7 +1140,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
 
     def _parse_backend_position_to_position_event(self, backend_position: DerivativePosition) -> PositionUpdateEvent:
         market_info: Dict[str, Any] = self._market_id_to_active_perp_markets[backend_position.market_id]
-        trading_pair: str = combine_to_hb_trading_pair(base=market_info["baseTokenMeta"]["symbol"], quote=market_info["quoteTokenMeta"]["Symbol"])
+        trading_pair: str = combine_to_hb_trading_pair(base=market_info["baseTokenMeta"]["symbol"], quote=market_info["quoteTokenMeta"]["symbol"])
         amount: Decimal = Decimal(backend_position.quantity)
         if backend_position.direction != "":
             position_side = PositionSide[backend_position.direction.upper()]
@@ -1148,7 +1148,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
                 Decimal(backend_position.entry_price) * Decimal(f"1e-{market_info['quoteTokenMeta']['decimals']}")
             )
             mark_price: Decimal = (
-                Decimal(backend_position.mark_price) * Decimal(f"1e-{market_info['minPriceTickSize']}")
+                Decimal(backend_position.mark_price) * Decimal(f"{market_info['minPriceTickSize']}")
             )
             leverage = Decimal(
                 round(
@@ -1233,7 +1233,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
             stream: UnaryStreamCall = await self._client.stream_oracle_prices(
                 base_symbol=market_info["baseTokenMeta"]["symbol"],
                 quote_symbol=market_info["quoteTokenMeta"]["symbol"],
-                oracle_type=market_info.oracle_type,
+                oracle_type="bandibc",
             )
             try:
                 async for message in stream:
@@ -1265,7 +1265,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
         self._positions_stream_listener = self._positions_stream_listener or safe_ensure_future(
             coro=self._listen_to_positions_stream()
         )
-        for market_id in [self._markets_info[tp].market_id for tp in self._trading_pairs]:
+        for market_id in [self._markets_info[tp]["marketId"] for tp in self._trading_pairs]:
             if market_id not in self._order_listeners:
                 self._order_listeners[market_id] = safe_ensure_future(
                     coro=self._listen_order_updates_stream(market_id=market_id)

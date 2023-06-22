@@ -7,6 +7,7 @@ from test.hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetua
 from typing import Awaitable, List
 from unittest.mock import AsyncMock, patch
 
+from aioresponses.core import aioresponses
 from bidict import bidict
 
 from hummingbot.client.config.client_config_map import ClientConfigMap
@@ -57,7 +58,8 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         cls.inj_trading_pair = combine_to_hb_trading_pair(base="INJ", quote=cls.quote)
         cls.sub_account_id = "0x72B52e007d01cc5aC36349288F24CE1Bd912CEDf000000000000000000000000"  # noqa: mock
 
-    def setUp(self) -> None:
+    @aioresponses()
+    def setUp(self, mock_api: aioresponses) -> None:
         super().setUp()
         self.initial_timestamp = 1669100347689
         self.injective_async_client_mock = InjectivePerpetualClientMock(
@@ -66,7 +68,7 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
             base=self.base,
             quote=self.quote,
         )
-        self.injective_async_client_mock.start()
+        self.injective_async_client_mock.start(mock_api=mock_api)
 
         client_config_map = ClientConfigAdapter(hb_config=ClientConfigMap())
 
@@ -99,7 +101,6 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         self.data_source.add_listener(event_tag=MarketEvent.FundingInfo, listener=self.funding_info_logger)
         self.data_source.add_listener(event_tag=OrderBookDataSourceEvent.TRADE_EVENT, listener=self.trades_logger)
         self.data_source.add_listener(event_tag=OrderBookDataSourceEvent.SNAPSHOT_EVENT, listener=self.snapshots_logger)
-
         self.async_run_with_timeout(coro=self.data_source.start())
 
     @staticmethod
@@ -1004,14 +1005,14 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
     def test_parse_position_event(self):
         expected_size = Decimal("1")
         expected_side = PositionSide.LONG
-        expecte_unrealized_pnl = Decimal("2")
+        expected_unrealized_pnl = Decimal("1.000000001")
         expected_entry_price = Decimal("1")
         expected_leverage = Decimal("3")
 
         self.injective_async_client_mock.configure_position_event(
             size=expected_size,
             side=expected_side,
-            unrealized_pnl=expecte_unrealized_pnl,
+            unrealized_pnl=expected_unrealized_pnl,
             entry_price=expected_entry_price,
             leverage=expected_leverage,
         )
@@ -1025,7 +1026,7 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         self.assertEqual(self.trading_pair, position_event.trading_pair)
         self.assertEqual(expected_size, position_event.amount)
         self.assertEqual(expected_side, position_event.position_side)
-        self.assertEqual(expecte_unrealized_pnl, position_event.unrealized_pnl)
+        self.assertEqual(expected_unrealized_pnl, position_event.unrealized_pnl)
         self.assertEqual(expected_entry_price, position_event.entry_price)
         self.assertEqual(expected_leverage, position_event.leverage)
 
