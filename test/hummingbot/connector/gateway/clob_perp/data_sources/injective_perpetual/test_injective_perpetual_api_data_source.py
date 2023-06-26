@@ -596,7 +596,16 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         self.assertEqual(quote_total_balance, sub_account_balances[self.quote]["total_balance"])
         self.assertEqual(quote_available_balance, sub_account_balances[self.quote]["available_balance"])
 
-    def test_get_account_balances_using_non_default_account(self):
+    @aioresponses()
+    def test_get_account_balances_using_non_default_account(self, mock_api):
+        params = {
+            "inj_base": "INJ",
+            "base": self.base,
+            "quote": self.quote,
+            "base_tokens": [self.base],
+            "initial_timestamp": self.initial_timestamp
+        }
+        InjectivePerpetualClientMock.configure_active_derivative_markets_response(mock_api=mock_api, **params)
         sub_account_id = "0x6df823e0adc0d4811e8d25d7380c1b45e43b16b0eea6f109cc1fb31d31aeddc7"  # noqa: mock
         connector_spec = {
             "chain": "injective",
@@ -633,6 +642,7 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         self.assertEqual(base_available_balance, sub_account_balances[self.base]["available_balance"])
         self.assertEqual(quote_total_balance, sub_account_balances[self.quote]["total_balance"])
         self.assertEqual(quote_available_balance, sub_account_balances[self.quote]["available_balance"])
+        self.async_run_with_timeout(coro=data_source.stop())
 
     def test_get_order_status_update_success(self):
         creation_transaction_hash = "0x7cb2eafc389349f86da901cdcbfd9119425a2ea84d61c17b6ded778b6fd2g81d"  # noqa: mock
@@ -827,12 +837,22 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         self.assertEqual(self.quote, balance_event.asset_name)
         self.assertEqual(target_available_balance, balance_event.available_balance)
 
-    def test_non_default_account_ignores_bank_balance_events(self):
+    @aioresponses()
+    def test_non_default_account_ignores_bank_balance_events(self, mock_api):
+        params = {
+            "inj_base": "INJ",
+            "base": self.base,
+            "quote": self.quote,
+            "base_tokens": [self.base],
+            "initial_timestamp": self.initial_timestamp
+        }
+        InjectivePerpetualClientMock.configure_active_derivative_markets_response(mock_api=mock_api, **params)
         sub_account_id = "0x6df823e0adc0d4811e8d25d7380c1b45e43b16b0eea6f109cc1fb31d31aeddc7"  # noqa: mock
         connector_spec = {
             "chain": "injective",
             "network": "mainnet",
             "wallet_address": sub_account_id,
+            "base_tokens": ["INJ", self.base]
         }
         data_source = InjectivePerpetualAPIDataSource(
             trading_pairs=[self.trading_pair],
@@ -853,10 +873,15 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
 
         self.assertEqual(0, len(self.balance_logger.event_log))
 
-    def test_delivers_funding_info_events(self):
+    @patch(
+        "hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetual.injective_perpetual_api_data_source.InjectivePerpetualAPIDataSource"
+        "._time"
+    )
+    def test_delivers_funding_info_events(self, time_mock):
+        time_mock.return_value = 123120123
         target_index_price = Decimal("100")
         target_mark_price = Decimal("101")
-        next_funding_time = 123123123
+        next_funding_time = 123123600
         target_rate = Decimal("0.0001")
         self.injective_async_client_mock.configure_funding_info_stream_event(
             index_price=target_index_price,
@@ -1005,7 +1030,7 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
     def test_parse_position_event(self):
         expected_size = Decimal("1")
         expected_side = PositionSide.LONG
-        expected_unrealized_pnl = Decimal("1.000000001")
+        expected_unrealized_pnl = Decimal("2")
         expected_entry_price = Decimal("1")
         expected_leverage = Decimal("3")
 
@@ -1087,10 +1112,15 @@ class InjectivePerpetualAPIDataSourceTest(unittest.TestCase):
         self.assertEqual(inj_position_expected_size, inj_position.amount)
         self.assertEqual(inj_position_expected_leverage, inj_position.leverage)
 
-    def test_get_funding_info(self):
+    @patch(
+        "hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetual.injective_perpetual_api_data_source.InjectivePerpetualAPIDataSource"
+        "._time"
+    )
+    def test_get_funding_info(self, time_mock):
+        time_mock.return_value = 123120123
         target_index_price = Decimal("100")
         target_mark_price = Decimal("101")
-        next_funding_time = 123123123
+        next_funding_time = 123123600
         target_rate = Decimal("0.0001")
 
         self.injective_async_client_mock.configure_get_funding_info_response(

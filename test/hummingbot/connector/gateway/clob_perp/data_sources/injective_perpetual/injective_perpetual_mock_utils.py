@@ -1,7 +1,7 @@
 import asyncio
 import json
 from decimal import Decimal
-from typing import Any, Callable, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Tuple, Type
 from unittest.mock import AsyncMock, patch
 
 import grpc
@@ -192,7 +192,23 @@ class InjectivePerpetualClientMock:
         self.injective_async_client_mock.stream_oracle_prices.return_value = StreamMock()
         self.injective_async_client_mock.stream_derivative_positions.return_value = StreamMock()
 
-        self.configure_active_derivative_markets_response(timestamp=self.initial_timestamp, mock_api=mock_api)
+        params = {
+            "inj_base": self.inj_base,
+            "base": self.base,
+            "quote": self.quote,
+            "base_coin_address": self.base_coin_address,
+            "quote_coin_address": self.quote_coin_address,
+            "base_decimals": self.base_decimals,
+            "quote_decimals": self.quote_decimals,
+            "initial_timestamp": self.initial_timestamp,
+            "market_id": self.market_id,
+            "inj_market_id": self.inj_market_id,
+            "base_tokens": [self.inj_base, self.base],
+            "min_price_tick_size": self.min_price_tick_size,
+            "min_quantity_tick_size": self.min_quantity_tick_size,
+        }
+
+        InjectivePerpetualClientMock.configure_active_derivative_markets_response(mock_api=mock_api, **params)
         self.configure_get_funding_info_response(
             index_price=Decimal("200"),
             mark_price=Decimal("202"),
@@ -914,12 +930,6 @@ class InjectivePerpetualClientMock:
             taker_fee=AddedToCostTradeFee(flat_fees=[TokenAmount(token=self.quote, amount=Decimal("0"))]),
         )
 
-        self._get_derivative_market_info(
-            market_id=self.market_id,
-            base_tokens=[self.base],
-            next_funding_time=next_funding_time,
-        )
-
     def configure_get_funding_payments_response(
         self, timestamp: float, funding_rate: Decimal, amount: Decimal
     ):
@@ -1165,12 +1175,11 @@ class InjectivePerpetualClientMock:
         )
         self.injective_async_client_mock.stream_txs.return_value.add(transaction_event)
 
-    def configure_active_derivative_markets_response(self, timestamp: float, mock_api: aioresponses, callback: Optional[Callable] = lambda *args, **kwargs: None):
+    @staticmethod
+    def configure_active_derivative_markets_response(mock_api: aioresponses, **kwargs):
         url = MARKETS_LIST_URL
-        response = self._get_derivative_market_info(
-            market_id='123', base_tokens=[self.base, self.inj_base]
-        )
-        mock_api.get(url, body=json.dumps(response), callback=callback, repeat=True)
+        response = InjectivePerpetualClientMock.get_derivative_market_info(**kwargs)
+        mock_api.get(url, body=json.dumps(response), repeat=True)
         return url
 
     def configure_get_derivative_positions_response(
@@ -1208,7 +1217,7 @@ class InjectivePerpetualClientMock:
                     entry_price=str(main_position_price * Decimal(f"1e{self.quote_decimals}")),
                     margin=str(margin),
                     liquidation_price="0",
-                    mark_price=str(main_position_mark_price * Decimal(f"1e{self.oracle_scale_factor}")),
+                    mark_price=str(main_position_mark_price * Decimal(f"1e{self.quote_decimals}")),
                     aggregate_reduce_only_quantity="0",
                     updated_at=1680511486496,
                     created_at=-62135596800000,
@@ -1230,7 +1239,7 @@ class InjectivePerpetualClientMock:
                     entry_price=str(inj_position_price * Decimal(f"1e{self.quote_decimals}")),
                     margin=str(margin),
                     liquidation_price="0",
-                    mark_price=str(inj_position_mark_price * Decimal(f"1e{self.oracle_scale_factor}")),
+                    mark_price=str(inj_position_mark_price * Decimal(f"1e{self.quote_decimals}")),
                     aggregate_reduce_only_quantity="0",
                     updated_at=1680511486496,
                     created_at=-62135596800000,
@@ -1255,7 +1264,7 @@ class InjectivePerpetualClientMock:
             direction="long" if side == PositionSide.LONG else "short",
             subaccount_id=self.sub_account_id,
             quantity=str(size),
-            mark_price=str(mark_price * Decimal(f"1e{self.oracle_scale_factor}")),
+            mark_price=str(mark_price * Decimal(f"1e{self.quote_decimals}")),
             entry_price=str(entry_price * Decimal(f"1e{self.quote_decimals}")),
             margin=str(margin * Decimal(f"1e{self.quote_decimals}")),
             aggregate_reduce_only_quantity="0",
@@ -1265,44 +1274,54 @@ class InjectivePerpetualClientMock:
         position_event = StreamPositionsResponse(position=position)
         self.injective_async_client_mock.stream_derivative_positions.return_value.add(position_event)
 
-    def _get_derivative_market_info(
-        self,
-        market_id: str,
-        base_tokens: List[str],
-        next_funding_time: float = 123123123
+    @staticmethod
+    def get_derivative_market_info(
+        inj_base: str,
+        base: str,
+        quote: str,
+        initial_timestamp: float,
+        base_coin_address = "someBaseCoinAddress",
+        quote_coin_address = "someQuoteCoinAddress",
+        base_decimals: int = 18,
+        quote_decimals: int = 8,
+        market_id: str = "someMarketId",
+        inj_market_id: str = "anotherMarketId",
+        base_tokens: List[str] = [],
+        min_price_tick_size=Decimal("0.000001"),
+        min_quantity_tick_size=Decimal("0.001"),
     ):
-        market_ids = {self.base: self.market_id, self.inj_base: self.inj_market_id}
+        market_ids = {base: market_id, inj_base: inj_market_id}
         markets = {"markets": []}
         for base_token in base_tokens:
             markets["markets"].append(
                 {
                     "marketId": market_ids[base_token],
-                    "ticker": f"{base_token}/{self.quote} PERP",
-                    "baseDenom": "peggy0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                    "ticker": f"{base_token}/{quote} PERP",
+                    "baseDenom": base_coin_address,
                     "baseTokenMeta":
                     {
                         "name": base_token,
-                        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+                        "address": base_coin_address,
                         "symbol": base_token,
                         "logo": "https://static.alchemyapi.io/images/assets/2396.png",
-                        "decimals": 18,
-                        "updatedAt": 1681165436593
+                        "decimals": base_decimals,
+                        "updatedAt": int(initial_timestamp * 1e3)
                     },
-                    "quoteDenom": "peggy0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                    "quoteDenom": quote_coin_address,
                     "quoteTokenMeta":
                     {
                         "name": "Alpha",
-                        "address": self.quote_coin_address,
-                        "symbol": self.quote,
+                        "address": quote_coin_address,
+                        "symbol": quote,
                         "logo": "https://static.alchemyapi.io/images/assets/3408.png",
-                        "decimals": self.quote_decimals,
-                        "updatedAt": int(self.initial_timestamp * 1e3)
+                        "decimals": quote_decimals,
+                        "updatedAt": int(initial_timestamp * 1e3)
                     },
                     "makerFeeRate": "-0.0001",
                     "takerFeeRate": "0.001",
                     "serviceProviderFee": "0.4",
-                    "minPriceTickSize": str(self.min_price_tick_size * Decimal(f"1e{self.quote_decimals}")),
-                    "minQuantityTickSize": str(self.min_quantity_tick_size)
+                    "minPriceTickSize": str(min_price_tick_size * Decimal(f"1e{quote_decimals}")),
+                    "minQuantityTickSize": str(min_quantity_tick_size)
                 }
             )
         return markets

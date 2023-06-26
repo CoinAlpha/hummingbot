@@ -189,10 +189,10 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
 
     async def get_order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         market_info = self._markets_info[trading_pair]
-        price_scaler: Decimal = Decimal(f"1e-{market_info.quote_token_meta.decimals}")
+        price_scaler: Decimal = Decimal(f"1e-{market_info['quoteTokenMeta']['decimals']}")
         async with self._throttler.execute_task(limit_id=CONSTANTS.ORDER_BOOK_LIMIT_ID):
             response: OrderbooksV2Response = await self._client.get_derivative_orderbooksV2(
-                market_ids=[market_info.market_id]
+                market_ids=[market_info["marketId"]]
             )
 
         snapshot_ob: DerivativeLimitOrderbookV2 = response.orderbooks[0].orderbook
@@ -200,7 +200,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
             [entry.timestamp for entry in list(snapshot_ob.buys) + list(snapshot_ob.sells)] + [0]
         )
         snapshot_content: Dict[str, Any] = {
-            "trading_pair": combine_to_hb_trading_pair(base=market_info.oracle_base, quote=market_info.oracle_quote),
+            "trading_pair": combine_to_hb_trading_pair(base=market_info["baseTokenMeta"]["decimals"], quote=market_info["quoteTokenMeta"]["decimals"]),
             "update_id": snapshot_timestamp_ms,
             "bids": [(Decimal(entry.price) * price_scaler, entry.quantity) for entry in snapshot_ob.buys],
             "asks": [(Decimal(entry.price) * price_scaler, entry.quantity) for entry in snapshot_ob.sells],
@@ -567,7 +567,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
 
             # FundingPayment does not include price, hence we have to fetch latest funding rate
             funding_rate: Decimal = await self._request_last_funding_rate(trading_pair=trading_pair)
-            amount_scaler: Decimal = Decimal(f"1e-{self._markets_info[trading_pair].quote_token_meta.decimals}")
+            amount_scaler: Decimal = Decimal(f"1e-{self._markets_info[trading_pair]['quoteTokenMeta']['decimals']}")
             payment: Decimal = Decimal(latest_funding_payment.amount) * amount_scaler
 
         return timestamp, funding_rate, payment
@@ -620,12 +620,12 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
     async def _update_markets(self):
         """Fetches and updates trading pair maps of active perpetual markets."""
         perpetual_markets: Dict[str, Any] = await self._fetch_derivative_markets()
-        self._update_market_map_attributes(markets=json.loads(perpetual_markets))
+        self._update_market_map_attributes(markets=perpetual_markets)
 
     async def _fetch_derivative_markets(self) -> Dict[str, Any]:
         async with aiohttp.ClientSession() as client:
             resp = await client.get(CONSTANTS.MARKETS_LIST_URL)
-            return await resp.text()
+            return json.loads(await resp.read())
 
     def _update_market_map_attributes(self, markets: Dict[str, Any]):
         """Parses MarketsResponse and re-populate the market map attributes"""
@@ -635,8 +635,8 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
             base_meta = market.get("baseTokenMeta")
             quote_meta = market.get("quoteTokenMeta")
             if base_meta is not None and quote_meta is not None:
-                self._denom_to_token_meta[base_meta["symbol"]] = base_meta
-                self._denom_to_token_meta[quote_meta["symbol"]] = quote_meta
+                self._denom_to_token_meta[base_meta["address"]] = base_meta
+                self._denom_to_token_meta[quote_meta["address"]] = quote_meta
                 trading_pair: str = combine_to_hb_trading_pair(base=base_meta["symbol"], quote=quote_meta["symbol"])
                 market_id: str = market["marketId"]
 
@@ -651,9 +651,9 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
 
     def _parse_trading_rule(self, trading_pair: str, market_info: Any) -> TradingRule:
         min_price_tick_size = (
-            Decimal(market_info.min_price_tick_size) * Decimal(f"1e-{market_info.quote_token_meta.decimals}")
+            Decimal(market_info.get("minPriceTickSize")) * Decimal(f"1e-{market_info.get('quoteTokenMeta').get('decimals', '0')}")
         )
-        min_quantity_tick_size = Decimal(market_info.min_quantity_tick_size)
+        min_quantity_tick_size = Decimal(market_info.get("minQuantityTickSize"))
         trading_rule = TradingRule(
             trading_pair=trading_pair,
             min_order_size=min_quantity_tick_size,
@@ -783,7 +783,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
         # NOTE: Can be replaced by calling GatewayHTTPClient.clob_perp_last_trade_price
         market_info: Dict[str, Any] = self._markets_info[trading_pair]
         async with self._throttler.execute_task(limit_id=CONSTANTS.DERIVATIVE_TRADES_LIMIT_ID):
-            response: TradesResponse = await self._client.get_derivative_trades(market_id=market_info.market_id)
+            response: TradesResponse = await self._client.get_derivative_trades(market_id=market_info["marketId"])
         last_trade: DerivativeTrade = response.trades[0]
         price_scaler: Decimal = Decimal(f"1e-{market_info['quoteTokenMeta']['decimals']}")
         last_trade_price: Decimal = Decimal(last_trade.position_delta.execution_price) * price_scaler
@@ -1148,7 +1148,7 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
                 Decimal(backend_position.entry_price) * Decimal(f"1e-{market_info['quoteTokenMeta']['decimals']}")
             )
             mark_price: Decimal = (
-                Decimal(backend_position.mark_price) * Decimal(f"{market_info['minPriceTickSize']}")
+                Decimal(backend_position.mark_price) * Decimal(f"1e-{market_info['quoteTokenMeta']['decimals']}")
             )
             leverage = Decimal(
                 round(
@@ -1191,11 +1191,12 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
                 raise
             except Exception:
                 self.logger().exception("Unexpected error in position listener loop.")
-            self.logger().info("Restarting position stream.")
-            stream.cancel()
+            finally:
+                self.logger().info("Restarting position stream.")
+                stream.cancel()
 
-    async def _process_funding_info_event(self, market_info: DerivativeMarketInfo, message: StreamPricesResponse):
-        trading_pair: str = combine_to_hb_trading_pair(base=market_info.oracle_base, quote=market_info.oracle_quote)
+    async def _process_funding_info_event(self, market_info: Dict[str, Any], message: StreamPricesResponse):
+        trading_pair: str = combine_to_hb_trading_pair(base=market_info["baseTokenMeta"]["symbol"], quote=market_info["quoteTokenMeta"]["symbol"])
         funding_info = await self._request_funding_info(trading_pair=trading_pair)
         funding_info_event = FundingInfoUpdate(
             trading_pair=trading_pair,
@@ -1213,15 +1214,11 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
         last_funding_rate: Decimal = await self._request_last_funding_rate(trading_pair=trading_pair)
         oracle_price: Decimal = await self._request_oracle_price(market_info=market_info)
         last_trade_price: Decimal = await self._request_last_trade_price(trading_pair=trading_pair)
-        async with self._throttler.execute_task(limit_id=CONSTANTS.SINGLE_DERIVATIVE_MARKET_LIMIT_ID):
-            updated_market_info = await self._client.get_derivative_market(market_id=market_info["marketId"])
         funding_info = FundingInfo(
             trading_pair=trading_pair,
             index_price=last_trade_price,  # Default to using last trade price
             mark_price=oracle_price,
-            next_funding_utc_timestamp=(
-                updated_market_info.market.perpetual_market_info.next_funding_timestamp * 1e-3
-            ),
+            next_funding_utc_timestamp=int(self._time()) + (3600 - int(self._time() % 3600)),  # funding settlement occurs every 1 hr
             rate=last_funding_rate,
         )
         return funding_info
@@ -1303,9 +1300,9 @@ class InjectivePerpetualAPIDataSource(CLOBPerpAPIDataSourceBase):
     ) -> MakerTakerExchangeFeeRates:
         # Since we are using the API, we are the service provider.
         # Reference: https://api.injective.exchange/#overview-trading-fees-and-gas
-        fee_scaler = Decimal("1") - Decimal(market_info.service_provider_fee)
-        maker_fee = Decimal(market_info.maker_fee_rate) * fee_scaler
-        taker_fee = Decimal(market_info.taker_fee_rate) * fee_scaler
+        fee_scaler = Decimal("1") - Decimal(market_info.get("serviceProviderFee"))
+        maker_fee = Decimal(market_info.get("makerFeeRate")) * fee_scaler
+        taker_fee = Decimal(market_info.get("takerFeeRate")) * fee_scaler
         maker_taker_exchange_fee_rates = MakerTakerExchangeFeeRates(
             maker=maker_fee, taker=taker_fee, maker_flat_fees=[], taker_flat_fees=[]
         )
