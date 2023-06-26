@@ -7,6 +7,8 @@ from test.hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetua
 from typing import Awaitable, Dict, List, Mapping
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aioresponses.core import aioresponses
+
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
 from hummingbot.client.config.fee_overrides_config_map import init_fee_overrides_config
@@ -57,7 +59,8 @@ class GatewayCLOBPERPTest(unittest.TestCase):
         cls.wallet_address = "someWalletAddress"
         cls.clock_tick_size = 1
 
-    def setUp(self) -> None:
+    @aioresponses()
+    def setUp(self, mock_api: aioresponses) -> None:
         super().setUp()
 
         self.log_records = []
@@ -70,7 +73,7 @@ class GatewayCLOBPERPTest(unittest.TestCase):
             base=self.base_asset,
             quote=self.quote_asset,
         )
-        self.clob_data_source_mock.start()
+        self.clob_data_source_mock.start(mock_api)
 
         client_config_map = ClientConfigAdapter(ClientConfigMap())
         connector_spec = {
@@ -413,8 +416,17 @@ class GatewayCLOBPERPTest(unittest.TestCase):
         self.assertEqual(expected_initial_dict, status_dict)
         self.assertFalse(exchange.ready)
 
+    @patch("hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetual.injective_perpetual_api_data_source.InjectivePerpetualAPIDataSource._fetch_derivative_markets")
     @patch("hummingbot.core.data_type.order_book_tracker.OrderBookTracker._sleep")
-    def test_full_initialization_and_de_initialization(self, _: AsyncMock):
+    def test_full_initialization_and_de_initialization(self, _: AsyncMock, mock_markets: MagicMock):
+        params = {
+            "inj_base": "INJ",
+            "base": "COINALPHA",
+            "quote": "HBOT",
+            "base_tokens": ["COINALPHA"],
+            "initial_timestamp": 123123123
+        }
+        mock_markets.return_value = InjectivePerpetualClientMock.get_derivative_market_info(**params)
         self.clob_data_source_mock.configure_get_account_balances_response(
             base_total_balance=Decimal("10"),
             base_available_balance=Decimal("9"),
@@ -1483,12 +1495,16 @@ class GatewayCLOBPERPTest(unittest.TestCase):
 
         self.assertTrue(self.is_logged("INFO", "Restarting account balances stream."))
 
-    def test_funding_info_update(self):
+    @patch(
+        "hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetual.injective_perpetual_api_data_source.InjectivePerpetualAPIDataSource"
+        "._time"
+    )
+    def test_funding_info_update(self, time_mock):
         initial_funding_info = self.exchange.get_funding_info(self.trading_pair)
-
         update_target_index_price = initial_funding_info.index_price + 1
         update_target_mark_price = initial_funding_info.mark_price + 2
         update_target_next_funding_time = initial_funding_info.next_funding_utc_timestamp * 2
+        time_mock.return_value = update_target_next_funding_time - 3600
         update_target_funding_rate = initial_funding_info.rate + Decimal("0.0003")
 
         self.clob_data_source_mock.configure_funding_info_stream_event(
