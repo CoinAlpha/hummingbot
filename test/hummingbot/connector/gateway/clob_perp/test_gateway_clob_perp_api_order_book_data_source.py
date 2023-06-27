@@ -5,7 +5,9 @@ from test.hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetua
     InjectivePerpetualClientMock,
 )
 from typing import Awaitable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from aioresponses.core import aioresponses
 
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
@@ -44,7 +46,8 @@ class GatewayCLOBPerpAPIOrderBookDataSourceTest(unittest.TestCase):
         cls.trading_pair = combine_to_hb_trading_pair(base=cls.base, quote=cls.quote)
         cls.sub_account_id = "someSubAccountId"
 
-    def setUp(self) -> None:
+    @aioresponses()
+    def setUp(self, mock_api: aioresponses) -> None:
         super().setUp()
         self.listening_tasks = []
 
@@ -55,7 +58,7 @@ class GatewayCLOBPerpAPIOrderBookDataSourceTest(unittest.TestCase):
             base=self.base,
             quote=self.quote,
         )
-        self.injective_async_client_mock.start()
+        self.injective_async_client_mock.start(mock_api)
 
         client_config_map = ClientConfigAdapter(hb_config=ClientConfigMap())
         self.api_data_source = InjectivePerpetualAPIDataSource(
@@ -204,7 +207,11 @@ class GatewayCLOBPerpAPIOrderBookDataSourceTest(unittest.TestCase):
             self.listening_tasks.append(listening_task)
             self.async_run_with_timeout(listening_task)
 
-    def test_listen_for_funding_info_successful(self):
+    @patch(
+        "hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetual.injective_perpetual_api_data_source.InjectivePerpetualAPIDataSource"
+        "._time"
+    )
+    def test_listen_for_funding_info_successful(self, time_mock):
         initial_funding_info = self.async_run_with_timeout(
             coro=self.ob_data_source.get_funding_info(self.trading_pair)
         )
@@ -212,6 +219,7 @@ class GatewayCLOBPerpAPIOrderBookDataSourceTest(unittest.TestCase):
         update_target_index_price = initial_funding_info.index_price + 1
         update_target_mark_price = initial_funding_info.mark_price + 2
         update_target_next_funding_time = initial_funding_info.next_funding_utc_timestamp * 2
+        time_mock.return_value = update_target_next_funding_time - 3600
         update_target_funding_rate = initial_funding_info.rate + Decimal("0.0003")
 
         self.injective_async_client_mock.configure_funding_info_stream_event(
@@ -232,10 +240,15 @@ class GatewayCLOBPerpAPIOrderBookDataSourceTest(unittest.TestCase):
         self.assertEqual(update_target_next_funding_time, updated_funding_info.next_funding_utc_timestamp)
         self.assertEqual(update_target_funding_rate, updated_funding_info.rate)
 
-    def test_get_funding_info(self):
+    @patch(
+        "hummingbot.connector.gateway.clob_perp.data_sources.injective_perpetual.injective_perpetual_api_data_source.InjectivePerpetualAPIDataSource"
+        "._time"
+    )
+    def test_get_funding_info(self, time_mock):
         expected_index_price = Decimal("10")
         expected_mark_price = Decimal("10.1")
-        expected_next_funding_time = 1610000000
+        expected_next_funding_time = 1610002800
+        time_mock.return_value = expected_next_funding_time - 3600
         expected_funding_rate = Decimal("0.0009")
 
         self.injective_async_client_mock.configure_get_funding_info_response(
