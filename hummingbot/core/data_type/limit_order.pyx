@@ -39,7 +39,7 @@ cdef class LimitOrder:
             list data = []
             str order_id_txt, type_txt, spread_txt, age_txt, hang_txt
             double price, quantity
-            long long age_seconds
+            double age_seconds
             long long now_timestamp = int(time.time() * 1e6) if end_time_order_age == 0 else end_time_order_age
         sells.extend(buys)
         for order in sells:
@@ -145,7 +145,7 @@ cdef class LimitOrder:
             str retval = cpp_position.decode("utf8")
         return PositionAction(retval)
 
-    cdef long long c_age_til(self, long long end_timestamp):
+    cdef double c_age_til(self, long long end_timestamp):
         """
         Calculates and returns age of the order since it was created til end_timestamp in seconds
         :param end_timestamp: The end timestamp
@@ -159,19 +159,19 @@ cdef class LimitOrder:
         if 0 < start_timestamp < end_timestamp:
             return int(end_timestamp - start_timestamp) / 1e6
         else:
-            return -1
+            return -1.0
 
-    cdef long long c_age(self):
+    cdef double c_age(self):
         """
         Calculates and returns age of the order since it was created til now.
         """
         return self.c_age_til(int(time.time() * 1e6))
 
     def age(self) -> int:
-        return self.c_age()
+        return int(self.c_age())
 
     def age_til(self, start_timestamp: int) -> int:
-        return self.c_age_til(start_timestamp)
+        return int(self.c_age_til(start_timestamp))
 
     def order_type(self) -> OrderType:
         return OrderType.LIMIT
