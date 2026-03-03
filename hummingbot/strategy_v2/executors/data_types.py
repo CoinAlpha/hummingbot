@@ -14,7 +14,7 @@ from hummingbot.core.data_type.common import TradeType
 class ExecutorConfigBase(BaseModel):
     id: str = None  # Make ID optional
     type: Literal["position_executor", "dca_executor", "grid_executor", "order_executor",
-                  "xemm_executor", "arbitrage_executor", "twap_executor"]
+                  "xemm_executor", "arbitrage_executor", "twap_executor", "lp_executor"]
     timestamp: Optional[float] = None
     controller_id: str = "main"
 
@@ -45,6 +45,13 @@ class ConnectorPair(BaseModel):
         return self.connector_name in sorted(
             AllConnectorSettings.get_gateway_amm_connector_names()
         )
+
+    class Config:
+        frozen = True  # This makes the model immutable and thus hashable
+
+    def __iter__(self):
+        yield self.connector_name
+        yield self.trading_pair
 
 
 class PositionSummary(BaseModel):

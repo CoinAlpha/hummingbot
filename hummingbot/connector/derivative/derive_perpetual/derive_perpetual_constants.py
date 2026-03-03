@@ -10,7 +10,7 @@ FUNDING_RATE_UPDATE_INTERNAL_SECOND = 60
 
 HBOT_ORDER_ID_PREFIX = "x-MG43PCSN"
 MAX_ORDER_ID_LEN = 32
-
+REFERRAL_CODE = "0x27F53feC538e477CE3eA1a456027adeCAC919DfD"
 RPC_ENDPOINT = "https://rpc.lyra.finance"
 TRADE_MODULE_ADDRESS = "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b"
 DOMAIN_SEPARATOR = "0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b"  # noqa: mock
@@ -35,7 +35,6 @@ TICKER_PRICE_CHANGE_PATH_URL = "/public/get_ticker"
 EXCHANGE_INFO_PATH_URL = "/public/get_all_currencies"
 EXCHANGE_CURRENCIES_PATH_URL = "/public/get_all_instruments"
 PING_PATH_URL = "/public/get_time"
-SNAPSHOT_PATH_URL = "/public/get_ticker"
 
 # Private API endpoints or DerivePerpetualClient function
 ACCOUNTS_PATH_URL = "/private/get_subaccount"
@@ -96,7 +95,6 @@ ENDPOINTS = {
             ORDER_STATUS_PAATH_URL,
             PING_PATH_URL,
             POSITION_INFORMATION_URL,
-            SNAPSHOT_PATH_URL,
             TICKER_PRICE_CHANGE_PATH_URL
         ],
     },
@@ -116,6 +114,7 @@ ORDER_STATE = {
 DIFF_EVENT_TYPE = "depthUpdate"
 SNAPSHOT_EVENT_TYPE = "depthUpdate"
 TRADE_EVENT_TYPE = "trade"
+FUNDING_INFO_STREAM_ID = "ticker"
 
 USER_ORDERS_ENDPOINT_NAME = "orders"
 USEREVENT_ENDPOINT_NAME = "trades"
@@ -158,12 +157,6 @@ RATE_LIMITS = [
     ),
     RateLimit(
         limit_id=EXCHANGE_CURRENCIES_PATH_URL,
-        limit=MARKET_MAKER_NON_MATCHING,
-        time_interval=SECOND,
-        linked_limits=[LinkedLimitWeightPair(MARKET_MAKER_ACCOUNTS_TYPE)],
-    ),
-    RateLimit(
-        limit_id=SNAPSHOT_PATH_URL,
         limit=MARKET_MAKER_NON_MATCHING,
         time_interval=SECOND,
         linked_limits=[LinkedLimitWeightPair(MARKET_MAKER_ACCOUNTS_TYPE)],

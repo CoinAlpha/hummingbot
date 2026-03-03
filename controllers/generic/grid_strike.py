@@ -1,10 +1,9 @@
 from decimal import Decimal
-from typing import Dict, List, Optional, Set
+from typing import List, Optional
 
 from pydantic import Field
 
-from hummingbot.core.data_type.common import OrderType, PositionMode, PriceType, TradeType
-from hummingbot.data_feed.candles_feed.data_types import CandlesConfig
+from hummingbot.core.data_type.common import MarketDict, OrderType, PositionMode, PriceType, TradeType
 from hummingbot.strategy_v2.controllers import ControllerBase, ControllerConfigBase
 from hummingbot.strategy_v2.executors.data_types import ConnectorPair
 from hummingbot.strategy_v2.executors.grid_executor.data_types import GridExecutorConfig
@@ -19,19 +18,18 @@ class GridStrikeConfig(ControllerConfigBase):
     """
     controller_type: str = "generic"
     controller_name: str = "grid_strike"
-    candles_config: List[CandlesConfig] = []
 
     # Account configuration
     leverage: int = 20
     position_mode: PositionMode = PositionMode.HEDGE
 
     # Boundaries
-    connector_name: str = "binance_perpetual"
+    connector_name: str = "okx"
     trading_pair: str = "WLD-USDT"
     side: TradeType = TradeType.BUY
-    start_price: Decimal = Field(default=Decimal("0.58"), json_schema_extra={"is_updatable": True})
-    end_price: Decimal = Field(default=Decimal("0.95"), json_schema_extra={"is_updatable": True})
-    limit_price: Decimal = Field(default=Decimal("0.55"), json_schema_extra={"is_updatable": True})
+    start_price: Decimal = Field(default=Decimal("0.38"), json_schema_extra={"is_updatable": True})
+    end_price: Decimal = Field(default=Decimal("0.75"), json_schema_extra={"is_updatable": True})
+    limit_price: Decimal = Field(default=Decimal("0.35"), json_schema_extra={"is_updatable": True})
 
     # Profiling
     total_amount_quote: Decimal = Field(default=Decimal("1000"), json_schema_extra={"is_updatable": True})
@@ -52,11 +50,8 @@ class GridStrikeConfig(ControllerConfigBase):
         take_profit_order_type=OrderType.LIMIT_MAKER,
     )
 
-    def update_markets(self, markets: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
-        if self.connector_name not in markets:
-            markets[self.connector_name] = set()
-        markets[self.connector_name].add(self.trading_pair)
-        return markets
+    def update_markets(self, markets: MarketDict) -> MarketDict:
+        return markets.add_or_update(self.connector_name, self.trading_pair)
 
 
 class GridStrike(ControllerBase):

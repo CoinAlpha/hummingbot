@@ -4,15 +4,15 @@ import re
 from abc import ABC, abstractmethod
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Union
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import ConfigDict, Field, SecretStr, field_validator, model_validator
 from tabulate import tabulate_formats
 
 from hummingbot.client.config.config_data_types import BaseClientModel, ClientConfigEnum
 from hummingbot.client.config.config_methods import using_exchange as using_exchange_pointer
 from hummingbot.client.config.config_validators import validate_bool, validate_float
-from hummingbot.client.settings import DEFAULT_GATEWAY_CERTS_PATH, DEFAULT_LOG_FILE_PATH, AllConnectorSettings
+from hummingbot.client.settings import DEFAULT_LOG_FILE_PATH, AllConnectorSettings
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.connector.connector_metrics_collector import (
     DummyMetricsCollector,
@@ -28,7 +28,7 @@ from hummingbot.core.rate_oracle.sources.rate_source_base import RateSourceBase
 from hummingbot.core.utils.kill_switch import ActiveKillSwitch, KillSwitch, PassThroughKillSwitch
 
 if TYPE_CHECKING:
-    from hummingbot.client.hummingbot_application import HummingbotApplication
+    from hummingbot.core.trading_core import TradingCore
 
 
 def generate_client_id() -> str:
@@ -229,7 +229,7 @@ class PaperTradeConfigMap(BaseClientModel):
 
 class KillSwitchMode(BaseClientModel, ABC):
     @abstractmethod
-    def get_kill_switch(self, hb: "HummingbotApplication") -> KillSwitch:
+    def get_kill_switch(self, trading_core: "TradingCore") -> KillSwitch:
         ...
 
 
@@ -243,15 +243,15 @@ class KillSwitchEnabledMode(KillSwitchMode):
     )
     model_config = ConfigDict(title="kill_switch_enabled")
 
-    def get_kill_switch(self, hb: "HummingbotApplication") -> ActiveKillSwitch:
-        kill_switch = ActiveKillSwitch(kill_switch_rate=self.kill_switch_rate, hummingbot_application=hb)
+    def get_kill_switch(self, trading_core: "TradingCore") -> ActiveKillSwitch:
+        kill_switch = ActiveKillSwitch(kill_switch_rate=self.kill_switch_rate, trading_core=trading_core)
         return kill_switch
 
 
 class KillSwitchDisabledMode(KillSwitchMode):
     model_config = ConfigDict(title="kill_switch_disabled")
 
-    def get_kill_switch(self, hb: "HummingbotApplication") -> PassThroughKillSwitch:
+    def get_kill_switch(self, trading_core: "TradingCore") -> PassThroughKillSwitch:
         kill_switch = PassThroughKillSwitch()
         return kill_switch
 
@@ -342,6 +342,11 @@ class GatewayConfigMap(BaseClientModel):
         default="15888",
         json_schema_extra={"prompt": lambda cm: "Please enter your Gateway API port"},
     )
+    gateway_use_ssl: bool = Field(
+        default=False,
+        json_schema_extra={"prompt": lambda cm: "Enable SSL endpoints for secure Gateway connection? (True / False)"},
+    )
+
     model_config = ConfigDict(title="gateway")
 
 
@@ -464,11 +469,6 @@ class BinanceRateSourceMode(ExchangeRateSourceModeBase):
     model_config = ConfigDict(title="binance")
 
 
-class BinanceUSRateSourceMode(ExchangeRateSourceModeBase):
-    name: str = Field(default="binance_us")
-    model_config = ConfigDict(title="binance_us")
-
-
 class MexcRateSourceMode(ExchangeRateSourceModeBase):
     name: str = Field(default="mexc")
     model_config = ConfigDict(title="mexc")
@@ -490,25 +490,67 @@ class CoinGeckoRateSourceMode(RateSourceModeBase):
             ),
         }
     )
+    api_key: str = Field(
+        default="",
+        description="API key to use to request information from CoinGecko (if empty public API will be used)",
+        json_schema_extra={
+            "prompt": lambda cm: "CoinGecko API key (optional, leave empty to use public API) NOTE: will be stored in plain text due to a bug in the way hummingbot loads the config file",
+            "prompt_on_new": True,
+            "is_connect_key": True,
+        },
+    )
+
+    api_tier: str = Field(
+        default="PUBLIC",
+        description="API tier for CoinGecko (PUBLIC, DEMO, or PRO)",
+        json_schema_extra={
+            "prompt": lambda cm: "Select CoinGecko API tier (PUBLIC/DEMO/PRO)",
+            "prompt_on_new": True,
+            "is_connect_key": True,
+        },
+    )
     model_config = ConfigDict(title="coin_gecko")
 
     def build_rate_source(self) -> RateSourceBase:
-        rate_source = RATE_ORACLE_SOURCES[self.model_config["title"]](
-            extra_token_ids=self.extra_tokens
+        return self._build_rate_source_cls(
+            extra_tokens=self.extra_tokens,
+            api_key=self.api_key,
+            api_tier=self.api_tier
         )
-        rate_source.extra_token_ids = self.extra_tokens
-        return rate_source
 
     @field_validator("extra_tokens", mode="before")
-    @classmethod
     def validate_extra_tokens(cls, value: Union[str, List[str]]):
         extra_tokens = value.split(",") if isinstance(value, str) else value
         return extra_tokens
 
+    @field_validator("api_tier", mode="before")
+    def validate_api_tier(cls, v: str):
+        from hummingbot.data_feed.coin_gecko_data_feed.coin_gecko_constants import CoinGeckoAPITier
+        valid_tiers = [tier.name for tier in CoinGeckoAPITier]
+        if v.upper() not in valid_tiers:
+            return CoinGeckoAPITier.PUBLIC.name
+        return v.upper()
+
     @model_validator(mode="after")
     def post_validations(self):
-        RateOracle.get_instance().source.extra_token_ids = self.extra_tokens
+        RateOracle.get_instance().source = self.build_rate_source()
         return self
+
+    @classmethod
+    def _build_rate_source_cls(cls, extra_tokens: List[str], api_key: str, api_tier: str) -> RateSourceBase:
+        from hummingbot.data_feed.coin_gecko_data_feed.coin_gecko_constants import CoinGeckoAPITier
+        try:
+            api_tier_enum = CoinGeckoAPITier[api_tier.upper()]
+        except KeyError:
+            api_tier_enum = CoinGeckoAPITier.PUBLIC
+
+        rate_source = RATE_ORACLE_SOURCES[cls.model_config["title"]](
+            extra_token_ids=extra_tokens,
+            api_key=api_key,
+            api_tier=api_tier_enum,
+        )
+        rate_source.extra_token_ids = extra_tokens
+        return rate_source
 
 
 class CoinCapRateSourceMode(RateSourceModeBase):
@@ -592,6 +634,18 @@ class DexalotRateSourceMode(ExchangeRateSourceModeBase):
 class CoinbaseAdvancedTradeRateSourceMode(ExchangeRateSourceModeBase):
     name: str = Field(default="coinbase_advanced_trade")
     model_config = ConfigDict(title="coinbase_advanced_trade")
+    use_auth_for_public_endpoints: bool = Field(
+        default=False,
+        description="Use authentication for public endpoints",
+        json_schema_extra = {
+            "prompt": lambda cm: "Would you like to use authentication for public endpoints? (Yes/No) (only affects rate limiting)",
+            "prompt_on_new": True,
+            "is_connect_key": True,
+        },
+    )
+
+    def build_rate_source(self) -> RateSourceBase:
+        return RATE_ORACLE_SOURCES[self.model_config["title"]](use_auth_for_public_endpoints=self.use_auth_for_public_endpoints)
 
 
 class HyperliquidRateSourceMode(ExchangeRateSourceModeBase):
@@ -599,20 +653,19 @@ class HyperliquidRateSourceMode(ExchangeRateSourceModeBase):
     model_config = ConfigDict(title="hyperliquid")
 
 
+class HyperliquidPerpetualRateSourceMode(ExchangeRateSourceModeBase):
+    name: str = Field(default="hyperliquid_perpetual")
+    model_config = ConfigDict(title="hyperliquid_perpetual")
+
+
 class DeriveRateSourceMode(ExchangeRateSourceModeBase):
     name: str = Field(default="derive")
     model_config = ConfigDict(title="derive")
 
 
-class TegroRateSourceMode(ExchangeRateSourceModeBase):
-    name: str = Field(default="tegro")
-    model_config = ConfigDict(title="tegro")
-
-
 RATE_SOURCE_MODES = {
     AscendExRateSourceMode.model_config["title"]: AscendExRateSourceMode,
     BinanceRateSourceMode.model_config["title"]: BinanceRateSourceMode,
-    BinanceUSRateSourceMode.model_config["title"]: BinanceUSRateSourceMode,
     CoinGeckoRateSourceMode.model_config["title"]: CoinGeckoRateSourceMode,
     CoinCapRateSourceMode.model_config["title"]: CoinCapRateSourceMode,
     DexalotRateSourceMode.model_config["title"]: DexalotRateSourceMode,
@@ -621,17 +674,10 @@ RATE_SOURCE_MODES = {
     CoinbaseAdvancedTradeRateSourceMode.model_config["title"]: CoinbaseAdvancedTradeRateSourceMode,
     CubeRateSourceMode.model_config["title"]: CubeRateSourceMode,
     HyperliquidRateSourceMode.model_config["title"]: HyperliquidRateSourceMode,
+    HyperliquidPerpetualRateSourceMode.model_config["title"]: HyperliquidPerpetualRateSourceMode,
     DeriveRateSourceMode.model_config["title"]: DeriveRateSourceMode,
-    TegroRateSourceMode.model_config["title"]: TegroRateSourceMode,
     MexcRateSourceMode.model_config["title"]: MexcRateSourceMode,
 }
-
-
-class CommandShortcutModel(BaseModel):
-    command: str
-    help: str
-    arguments: List[str]
-    output: List[str]
 
 
 class ClientConfigMap(BaseClientModel):
@@ -676,10 +722,6 @@ class ClientConfigMap(BaseClientModel):
         description="Error log sharing",
         json_schema_extra={"prompt": lambda cm: "Would you like to send error logs to hummingbot? (True/False)"},
     )
-    previous_strategy: Optional[str] = Field(
-        default=None,
-        description="Can store the previous strategy ran for quick retrieval."
-    )
     db_mode: Union[tuple(DB_MODES.values())] = Field(
         default=DBSqliteMode(),
         description=("Advanced database options, currently supports SQLAlchemy's included dialects"
@@ -712,28 +754,11 @@ class ClientConfigMap(BaseClientModel):
                      "\ndefault host to only use localhost"
                      "\nPort need to match the final installation port for Gateway"),
     )
-    certs_path: Path = Field(
-        default=DEFAULT_GATEWAY_CERTS_PATH,
-        json_schema_extra={"prompt": lambda cm: "Where would you like to save certificates that connect your bot to Gateway? (default 'certs')"},
-    )
 
     anonymized_metrics_mode: Union[tuple(METRICS_MODES.values())] = Field(
         default=AnonymizedMetricsEnabledMode(),
         description="Whether to enable aggregated order and trade data collection",
         json_schema_extra={"prompt": lambda cm: f"Select the desired metrics mode ({'/'.join(list(METRICS_MODES.keys()))})"},
-    )
-    command_shortcuts: List[CommandShortcutModel] = Field(
-        default=[
-            CommandShortcutModel(
-                command="spreads",
-                help="Set bid and ask spread",
-                arguments=["Bid Spread", "Ask Spread"],
-                output=["config bid_spread $1", "config ask_spread $2"]
-            )
-        ],
-        description=("Command Shortcuts"
-                     "\nDefine abbreviations for often used commands"
-                     "\nor batch grouped commands together"),
     )
     rate_oracle_source: Union[tuple(RATE_SOURCE_MODES.values())] = Field(
         default=BinanceRateSourceMode(),
@@ -787,16 +812,28 @@ class ClientConfigMap(BaseClientModel):
     @classmethod
     def validate_kill_switch_mode(cls, v: Any):
         if isinstance(v, tuple(KILL_SWITCH_MODES.values())):
-            sub_model = v
-        elif v == {}:
-            sub_model = KillSwitchDisabledMode()
-        elif v not in KILL_SWITCH_MODES:
-            raise ValueError(
-                f"Invalid kill switch mode, please choose a value from {list(KILL_SWITCH_MODES.keys())}."
-            )
-        else:
-            sub_model = KILL_SWITCH_MODES[v].model_construct()
-        return sub_model
+            return v  # Already a valid model
+
+        if v == {}:
+            return KillSwitchDisabledMode()
+
+        if isinstance(v, dict):
+            # Try validating against known mode models
+            for mode_cls in KILL_SWITCH_MODES.values():
+                try:
+                    return mode_cls.model_validate(v)
+                except Exception:
+                    continue
+            raise ValueError(f"Could not match dict to any known kill switch mode: {v}")
+
+        if isinstance(v, str):
+            if v not in KILL_SWITCH_MODES:
+                raise ValueError(
+                    f"Invalid kill switch mode string. Choose from: {list(KILL_SWITCH_MODES.keys())}."
+                )
+            return KILL_SWITCH_MODES[v].model_construct()
+
+        raise ValueError(f"Unsupported type for kill switch mode: {type(v)}")
 
     @field_validator("autofill_import", mode="before")
     @classmethod

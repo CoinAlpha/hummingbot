@@ -94,3 +94,10 @@ coverage.xml
 /**/.injective_cookie
 
 .env
+
+**/.claude/settings.local.json
+
+# Editor/AI tool directories
+.claude/
+.cursor/
+.agents/
